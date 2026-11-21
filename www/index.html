@@ -348,3 +348,226 @@ function drawSearch(){
   box.innerHTML=(S.items.length?grid(S.items):'')
     +(S.err?'<p class="empty">No se pudo buscar: '+esc(S.err)+'</p>':'')
     +(S.q&&!S.items.length&&!S.err?'<p class="empty">Sin resultados para "'+esc(S.q)+'".</p>':'')
+    +(!S.q?'<p class="empty">Escribe el nombre de un anime.</p>':'')
+    +(S.q&&!S.done&&S.items.length?'<button class="btn more" id="smore">Cargar más</button>':'');
+  const b=$('#smore');if(b)b.onclick=()=>{b.textContent='Cargando…';doSearch(S.page+1)};
+}
+
+/* ---- Mi lista ---- */
+function rFavs(){
+  $('#main').innerHTML=(favs.length?'<h3>Favoritos</h3>'+grid(favs):'<p class="empty">Aún no tienes favoritos.<br>Abre un anime y toca “Favorito”.</p>')
+    +(hist.length?'<h3>Vistos recientemente</h3>'+grid(hist):'');
+}
+
+/* ---- Módulos ---- */
+function rMods(){
+  const a=cur().id;
+  $('#main').innerHTML=
+   '<h3>Módulos instalados</h3>'+mods.map(m=>'<div class="mrow"><div><b>'+esc(m.name)+'</b><small>'+esc(m.id)+' · v'+esc(m.version||1)+(m.builtin?' · incluido':'')+'</small></div>'
+     +(a===m.id?'<span class="tag">activo</span>':'<button class="sm" data-act="use" data-id="'+esc(m.id)+'">Usar</button>')
+     +(m.builtin?'':'<button class="sm del" data-act="del" data-id="'+esc(m.id)+'">Quitar</button>')+'</div>').join('')
+   +'<h3>Instalar un módulo</h3>'
+   +'<input id="mUrl" placeholder="Enlace al archivo .js del módulo"><button class="btn" id="mInstUrl">Instalar desde enlace</button>'
+   +'<textarea id="mCode" rows="6" placeholder="…o pega aquí el código del módulo"></textarea><button class="btn" id="mInstCode">Instalar código pegado</button>'
+   +'<button class="btn ghost" id="mTpl">Copiar plantilla para pedirle módulos a tu IA</button>'
+   +'<p class="note">Un módulo es código que corre dentro de la app con acceso a internet. Instala solo módulos que hayas creado tú o de personas en las que confíes.</p>'
+   +'<h3>Reproducir un enlace directo</h3>'
+   +'<input id="dUrl" placeholder="https://…/video.mp4 o .m3u8"><button class="btn" id="dPlay">Reproducir</button>';
+}
+$('#main').addEventListener('click',async e=>{
+  const t=e.target;
+  if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};rebuildSel();rMods()}
+  else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','anilist');homeSt={mod:null};loadMods();rMods()}
+  else if(t.id==='mInstUrl'){
+    const u=$('#mUrl').value.trim();if(!u)return toast('Escribe el enlace');
+    try{t.textContent='Descargando…';installCode(await api.text(u));rMods()}catch(err){t.textContent='Instalar desde enlace';toast('Error: '+err.message)}
+  }
+  else if(t.id==='mInstCode'){
+    const c=$('#mCode').value.trim();if(!c)return toast('Pega el código primero');
+    try{installCode(c);rMods()}catch(err){toast('Error: '+err.message)}
+  }
+  else if(t.id==='mTpl'){
+    try{await navigator.clipboard.writeText(TEMPLATE);toast('Plantilla copiada')}
+    catch(err){$('#mCode').value=TEMPLATE;toast('Plantilla puesta en el cuadro de código')}
+  }
+  else if(t.id==='dPlay'){
+    const u=$('#dUrl').value.trim();if(!/^https?:\/\//i.test(u))return toast('Escribe un enlace válido');
+    openPlayer({title:'Enlace directo',list:[{title:'Video'}],idx:0,load:async()=>[{label:'Directo',url:u,type:guess(u)}],key:null});
+  }
+});
+
+/* ============ ficha del anime ============ */
+let D=null,dTok=0;
+async function openDetail(modId,url,hint){
+  hint=hint||{};
+  const m=modById(modId);if(!m)return toast('Ese módulo ya no está instalado');
+  const el=$('#detail'),tok=++dTok;
+  el.hidden=false;el.scrollTop=0;
+  if(stack[stack.length-1]!=='detail')pushOv('detail');
+  el.innerHTML='<button class="back" id="dBack" aria-label="Volver">‹</button><div class="dhead" id="dHead"></div><div class="dbody"><p class="empty">Cargando…</p></div>';
+  setHead(hint.cover);
+  $('#dBack').onclick=()=>history.back();
+  try{
+    const d=await m.details(url);
+    if(tok!==dTok||el.hidden)return;
+    D={m,d,url,rev:false,hint};
+    drawDetail();
+  }catch(err){
+    if(tok!==dTok||el.hidden)return;
+    $('.dbody',el).innerHTML='<p class="empty">No se pudo abrir este anime.<br>'+esc(err.message)+'</p>';
+  }
+}
+function setHead(u){if(u)$('#dHead').style.backgroundImage='url("'+String(u).replace(/"/g,'%22')+'")'}
+const epKey=(m,e)=>m.id+'|'+e.url;
+function drawDetail(){
+  const {m,d,url,hint}=D,el=$('#detail'),eps=d.episodes||[];
+  const title=d.title||hint.title,cover=d.cover||hint.cover;
+  setHead(d.banner||cover);
+  const nextI=Math.max(0,eps.findIndex(e=>{const p=PROG[epKey(m,e)];return !(p&&p.done)}));
+  const started=eps.some(e=>PROG[epKey(m,e)]);
+  $('.dbody',el).innerHTML=
+   '<div class="drow"><img class="dcover" src="'+esc(cover)+'" alt=""><div><h1>'+esc(title)+'</h1><div class="meta">'+[d.year,d.status,eps.length?eps.length+' episodios':''].filter(Boolean).map(esc).join(' · ')+'</div></div></div>'
+   +'<div class="chips">'+(d.genres||[]).map(g=>'<span>'+esc(g)+'</span>').join('')+'</div>'
+   +'<div class="acts">'+(eps.length?'<button class="btn" id="dGo">'+(started?'Continuar':'Ver')+' ep. '+esc(eps[nextI].number||nextI+1)+'</button>':'')
+   +'<button class="btn ghost" id="dFav">'+(isFav(m.id,url)?'★ En mi lista':'☆ Favorito')+'</button>'
+   +(d.trailer?'<button class="btn ghost" id="dTr">Tráiler</button>':'')+'</div>'
+   +'<p class="desc" id="dDesc">'+esc(strip(d.description)||'Sin descripción.')+'</p>'
+   +'<div class="eh"><h3>Episodios</h3><button class="sm" id="dOrd">Invertir orden</button></div><div class="eps" id="eps"></div>';
+  drawEps();
+  $('#dDesc').onclick=e=>e.currentTarget.classList.toggle('open');
+  const item={mod:m.id,url,title,cover};
+  $('#dFav').onclick=e=>{toggleFav(item);e.target.textContent=isFav(m.id,url)?'★ En mi lista':'☆ Favorito'};
+  if(eps.length)$('#dGo').onclick=()=>playFrom(nextI);
+  if(d.trailer)$('#dTr').onclick=()=>openPlayer({title:title+' · Tráiler',list:[{title:'Tráiler'}],idx:0,load:async()=>[{label:'YouTube',url:'https://www.youtube.com/embed/'+d.trailer,type:'embed'}],key:null});
+  $('#dOrd').onclick=()=>{D.rev=!D.rev;drawEps()};
+}
+function drawEps(){
+  const {m,d,rev}=D,eps=d.episodes||[];
+  let idx=eps.map((_,i)=>i);if(rev)idx.reverse();
+  $('#eps').innerHTML=idx.map(i=>{
+    const e=eps[i],p=PROG[epKey(m,e)]||{},pc=p.done?100:(p.d?Math.min(100,p.t/p.d*100):0);
+    return '<button class="ep'+(p.done?' done':'')+'" data-i="'+i+'"><span class="n">'+esc(e.number||i+1)+'</span><span class="t">'+esc(e.title||('Episodio '+(i+1)))+'</span>'+(pc?'<span class="bar" style="width:'+pc+'%"></span>':'')+'</button>';
+  }).join('')||'<p class="empty">Este módulo no devolvió episodios.</p>';
+}
+$('#detail').addEventListener('click',e=>{const b=e.target.closest('.ep');if(b&&D)playFrom(+b.dataset.i)});
+function playFrom(i){
+  const {m,d,url,hint}=D,title=d.title||hint.title;
+  addHist({mod:m.id,url,title,cover:d.cover||hint.cover});
+  openPlayer({
+    title,list:d.episodes,idx:i,
+    key:k=>epKey(m,d.episodes[k]),
+    load:k=>m.videos(d.episodes[k].url,{detail:d,episode:d.episodes[k]})
+  });
+}
+
+/* ============ reproductor interno ============ */
+let P=null,hls=null,vid=null,hideT=null,seeking=false,lastSave=0,isFs=false;
+const guess=u=>/\.m3u8(\?|#|$)/i.test(u)?'hls':/\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(u)?'mp4':'embed';
+const setMsg=t=>{$('#pMsg').textContent=t||''};
+function openPlayer(cfg){
+  P=cfg;$('#player').hidden=false;
+  if(stack[stack.length-1]!=='player')pushOv('player');
+  loadEp(cfg.idx);
+}
+async function loadEp(i){
+  P.idx=i;const ep=P.list[i];
+  $('#pEp').textContent=(ep.number?'Episodio '+ep.number+' · ':'')+(ep.title||P.title);
+  $('#pTitle').textContent=P.title+(ep.title?' · '+ep.title:'');
+  $('#pPrev').disabled=i<=0;$('#pNext').disabled=i>=P.list.length-1;
+  $('#pSrc').innerHTML='';cleanupVideo();setMsg('Buscando fuentes…');
+  $('#stage').classList.add('novid');
+  let srcs;
+  try{srcs=(await P.load(i))||[]}catch(err){if(P&&P.idx===i)setMsg('Error: '+err.message);return}
+  if(!P||P.idx!==i)return;
+  srcs=srcs.map(s=>Object.assign({},s,{type:s.type||guess(s.url)}));
+  P.srcs=srcs;
+  $('#pSrc').innerHTML=srcs.map((s,k)=>'<button data-k="'+k+'">'+esc(s.label||('Fuente '+(k+1)))+'</button>').join('');
+  const first=srcs.findIndex(s=>s.type!=='external');
+  if(first<0){setMsg(srcs.length?'Estas fuentes se abren fuera de la app. Elige una abajo.':'Este módulo no devolvió fuentes de video para este episodio.');return}
+  pickSrc(first);
+}
+function pickSrc(k){
+  const s=P.srcs[k];
+  if(s.type==='external'){window.open(s.url,'_blank');return}
+  document.querySelectorAll('#pSrc button').forEach((b,j)=>b.classList.toggle('on',j===k));
+  startSource(s);
+}
+function cleanupVideo(){
+  if(hls){try{hls.destroy()}catch(e){}hls=null}
+  if(vid){try{vid.pause();vid.removeAttribute('src');vid.load()}catch(e){}}
+  vid=null;$('#vbox').innerHTML='';
+}
+function startSource(s){
+  cleanupVideo();setMsg('');
+  const box=$('#vbox'),stage=$('#stage');
+  if(s.type==='embed'){
+    stage.classList.add('novid');
+    box.innerHTML='<iframe src="'+esc(s.url)+'" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+    return;
+  }
+  stage.classList.remove('novid');stage.classList.add('show');
+  const v=document.createElement('video');
+  v.setAttribute('playsinline','');v.preload='auto';box.appendChild(v);vid=v;
+  if(s.type==='hls'&&window.Hls&&Hls.isSupported()){
+    hls=new Hls({maxBufferLength:30});
+    hls.loadSource(s.url);hls.attachMedia(v);
+    hls.on(Hls.Events.ERROR,(ev,data)=>{if(data.fatal)setMsg('No se pudo reproducir esta fuente. Prueba otra.')});
+  }else v.src=s.url;
+  const key=P.key?P.key(P.idx):null;
+  v.addEventListener('loadedmetadata',()=>{
+    $('#pDur').textContent=fmt(v.duration);
+    const p=key&&PROG[key];if(p&&p.t>5&&p.d&&p.t<p.d-15)v.currentTime=p.t;
+  });
+  v.addEventListener('timeupdate',()=>{
+    if(!seeking&&v.duration)$('#pSeek').value=v.currentTime/v.duration*1000;
+    $('#pCur').textContent=fmt(v.currentTime);
+    if(key&&v.duration&&Date.now()-lastSave>4000){lastSave=Date.now();PROG[key]={t:v.currentTime,d:v.duration,done:v.currentTime>v.duration*.92};saveProg()}
+  });
+  v.addEventListener('play',()=>{$('#pPlay').textContent='❚❚';armHide()});
+  v.addEventListener('pause',()=>{$('#pPlay').textContent='▶';stage.classList.add('show')});
+  v.addEventListener('waiting',()=>setMsg('Cargando…'));
+  v.addEventListener('playing',()=>setMsg(''));
+  v.addEventListener('error',()=>setMsg('No se pudo reproducir esta fuente. Prueba otra.'));
+  v.addEventListener('ended',()=>{
+    if(key){PROG[key]={t:v.duration,d:v.duration,done:true};saveProg()}
+    if(P.idx<P.list.length-1)loadEp(P.idx+1);
+  });
+  v.play().catch(()=>{});
+}
+function armHide(){
+  clearTimeout(hideT);
+  hideT=setTimeout(()=>{if(vid&&!vid.paused)$('#stage').classList.remove('show')},3500);
+}
+async function setFs(on){
+  isFs=on;$('#player').classList.toggle('fs',on);
+  try{const SO=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.ScreenOrientation;
+    if(SO){if(on)await SO.lock({orientation:'landscape'});else await SO.unlock()}}catch(e){}
+}
+function closePlayerUI(){
+  if(vid&&P&&P.key&&vid.duration){const k=P.key(P.idx);PROG[k]={t:vid.currentTime,d:vid.duration,done:vid.currentTime>vid.duration*.92};saveProg()}
+  setFs(false);cleanupVideo();$('#player').hidden=true;P=null;
+  if(D&&!$('#detail').hidden)drawEps();
+}
+$('#stage').addEventListener('click',e=>{
+  if(e.target.closest('button,input'))return;
+  const s=$('#stage');s.classList.toggle('show');if(s.classList.contains('show'))armHide();
+});
+$('#pBack').onclick=()=>history.back();
+$('#pFs').onclick=()=>setFs(!isFs);
+$('#pPlay').onclick=()=>{if(vid){vid.paused?vid.play():vid.pause()}};
+$('#pRw').onclick=()=>{if(vid){vid.currentTime=Math.max(0,vid.currentTime-10);armHide()}};
+$('#pFw').onclick=()=>{if(vid){vid.currentTime=Math.min(vid.duration||1e9,vid.currentTime+10);armHide()}};
+$('#pSeek').addEventListener('input',e=>{seeking=true;if(vid&&vid.duration){$('#pCur').textContent=fmt(e.target.value/1000*vid.duration)}});
+$('#pSeek').addEventListener('change',e=>{if(vid&&vid.duration)vid.currentTime=e.target.value/1000*vid.duration;seeking=false;armHide()});
+const SPEEDS=[1,1.25,1.5,2,0.75];
+$('#pSpd').onclick=e=>{if(!vid)return;const n=SPEEDS[(SPEEDS.indexOf(vid.playbackRate)+1)%SPEEDS.length];vid.playbackRate=n;e.target.textContent=n+'x'};
+$('#pPrev').onclick=()=>{if(P&&P.idx>0)loadEp(P.idx-1)};
+$('#pNext').onclick=()=>{if(P&&P.idx<P.list.length-1)loadEp(P.idx+1)};
+$('#pSrc').addEventListener('click',e=>{const b=e.target.closest('button');if(b&&P)pickSrc(+b.dataset.k)});
+
+/* ============ inicio ============ */
+loadMods();
+setTab('home');
+</script>
+</body>
+</html>
