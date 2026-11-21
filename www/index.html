@@ -89,6 +89,10 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 .cbot{display:flex;align-items:center;gap:10px;padding:6px 12px 12px;font-size:12px}
 #pSeek{flex:1;padding:0;height:24px;background:none;border:0;accent-color:var(--ac)}
 #pSpd{font-size:12px;font-weight:700}
+#stage{touch-action:none}
+#pFit{font-size:12px!important;font-weight:700;border:1px solid #ffffff55!important;border-radius:999px;padding:5px 10px!important}
+#hud{position:absolute;top:16%;left:50%;transform:translateX(-50%);background:#000b;color:#fff;font-size:15px;font-weight:700;padding:9px 16px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .15s;white-space:nowrap}
+#hud.on{opacity:1}
 #pMsg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px;font-size:13px;color:#ddd;pointer-events:none}
 #pinfo{flex:1;overflow-y:auto;background:var(--bg);padding:14px 16px calc(24px + env(safe-area-inset-bottom))}
 #pEp{font-weight:700;font-size:15px}
@@ -118,11 +122,12 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
   <div id="stage">
     <div id="vbox"></div>
     <div id="ctl">
-      <div class="ctop"><button id="pBack" aria-label="Volver">‹</button><div id="pTitle"></div><button id="pFs" aria-label="Pantalla completa">⛶</button></div>
+      <div class="ctop"><button id="pBack" aria-label="Volver">‹</button><div id="pTitle"></div><button id="pFit" aria-label="Ajuste de imagen">Ajustar</button><button id="pFs" aria-label="Pantalla completa">⛶</button></div>
       <div class="cmid"><button id="pRw">⟲ 10</button><button id="pPlay" aria-label="Reproducir o pausar">▶</button><button id="pFw">10 ⟳</button></div>
       <div class="cbot"><span id="pCur">0:00</span><input type="range" id="pSeek" min="0" max="1000" value="0"><span id="pDur">0:00</span><button id="pSpd">1x</button></div>
     </div>
     <div id="pMsg"></div>
+    <div id="hud"></div>
   </div>
   <div id="pinfo">
     <div id="pEp"></div>
@@ -462,6 +467,13 @@ function playFrom(i){
 
 /* ============ reproductor interno ============ */
 let P=null,hls=null,vid=null,hideT=null,seeking=false,lastSave=0,isFs=false;
+let bright=LS.get('bri',1),vol=LS.get('vol',1),fitI=LS.get('fit',0),hudT=null;
+const FITS=[['contain','Ajustar'],['cover','Rellenar'],['fill','Estirar']];
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+function applyFit(){if(vid)vid.style.objectFit=FITS[fitI][0];$('#pFit').textContent=FITS[fitI][1]}
+function applyBright(){if(vid)vid.style.filter=bright===1?'':'brightness('+bright+')'}
+function hud(t){const e=$('#hud');e.textContent=t;e.classList.add('on');clearTimeout(hudT)}
+function hideHud(ms){clearTimeout(hudT);hudT=setTimeout(()=>$('#hud').classList.remove('on'),ms||500)}
 const guess=u=>/\.m3u8(\?|#|$)/i.test(u)?'hls':/\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(u)?'mp4':'embed';
 const setMsg=t=>{$('#pMsg').textContent=t||''};
 function openPlayer(cfg){
@@ -507,7 +519,7 @@ function startSource(s){
   }
   stage.classList.remove('novid');stage.classList.add('show');
   const v=document.createElement('video');
-  v.setAttribute('playsinline','');v.preload='auto';box.appendChild(v);vid=v;
+  v.setAttribute('playsinline','');v.preload='auto';box.appendChild(v);vid=v;applyFit();applyBright();v.volume=vol;
   if(s.type==='hls'&&window.Hls&&Hls.isSupported()){
     hls=new Hls({maxBufferLength:30});
     hls.loadSource(s.url);hls.attachMedia(v);
@@ -548,9 +560,49 @@ function closePlayerUI(){
   setFs(false);cleanupVideo();$('#player').hidden=true;P=null;
   if(D&&!$('#detail').hidden)drawEps();
 }
-$('#stage').addEventListener('click',e=>{
-  if(e.target.closest('button,input'))return;
-  const s=$('#stage');s.classList.toggle('show');if(s.classList.contains('show'))armHide();
+$('#pFit').onclick=()=>{fitI=(fitI+1)%FITS.length;LS.set('fit',fitI);applyFit();hud(FITS[fitI][1]);hideHud(700)};
+/* gestos: izquierda=brillo, derecha=volumen, horizontal=adelantar/atrasar, doble toque=±10 s */
+let G=null,tapT=0,tapTimer=null;
+const stg=$('#stage');
+stg.addEventListener('touchstart',e=>{
+  if(!vid||e.target.closest('button,input'))return;
+  const t=e.touches[0],r=stg.getBoundingClientRect();
+  G={x:t.clientX,y:t.clientY,side:(t.clientX-r.left)<r.width/2?'L':'R',mode:null,sv:vid.volume,sb:bright,st:vid.currentTime,w:r.width,h:r.height,target:null};
+},{passive:true});
+stg.addEventListener('touchmove',e=>{
+  if(!G||!vid)return;
+  const t=e.touches[0],dx=t.clientX-G.x,dy=t.clientY-G.y;
+  if(!G.mode){
+    if(Math.abs(dx)<14&&Math.abs(dy)<14)return;
+    G.mode=Math.abs(dx)>Math.abs(dy)?'seek':(G.side==='L'?'bri':'vol');
+  }
+  e.preventDefault();
+  if(G.mode==='seek'&&vid.duration){
+    const d=dx/G.w*Math.min(240,vid.duration);
+    G.target=clamp(G.st+d,0,vid.duration);
+    hud((d>=0?'+':'-')+Math.abs(Math.round(d))+' s · '+fmt(G.target));
+  }else if(G.mode==='bri'){
+    bright=clamp(G.sb-dy/G.h*1.4,0.2,1.6);applyBright();hud('☀ '+Math.round(bright*100)+'%');
+  }else if(G.mode==='vol'){
+    vid.volume=clamp(G.sv-dy/G.h*1.4,0,1);vol=vid.volume;hud('🔊 '+Math.round(vol*100)+'%');
+  }
+},{passive:false});
+stg.addEventListener('touchend',()=>{
+  if(!G)return;const g=G;G=null;
+  if(g.mode){
+    if(g.mode==='seek'&&vid&&g.target!=null)vid.currentTime=g.target;
+    if(g.mode==='bri')LS.set('bri',bright);
+    if(g.mode==='vol')LS.set('vol',vol);
+    hideHud();return;
+  }
+  const now=Date.now();
+  if(vid&&now-tapT<300){
+    clearTimeout(tapTimer);tapT=0;
+    vid.currentTime=clamp(vid.currentTime+(g.side==='L'?-10:10),0,vid.duration||1e9);
+    hud(g.side==='L'?'⟲ -10 s':'+10 s ⟳');hideHud(600);return;
+  }
+  tapT=now;
+  tapTimer=setTimeout(()=>{tapT=0;stg.classList.toggle('show');if(stg.classList.contains('show'))armHide()},300);
 });
 $('#pBack').onclick=()=>history.back();
 $('#pFs').onclick=()=>setFs(!isFs);
@@ -568,6 +620,19 @@ $('#pSrc').addEventListener('click',e=>{const b=e.target.closest('button');if(b&
 /* ============ inicio ============ */
 loadMods();
 setTab('home');
+
+/* ============ botón/gesto atrás de Android ============ */
+try{
+  const AppP=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.App;
+  if(AppP&&AppP.addListener){
+    AppP.addListener('backButton',()=>{
+      if(isFs)setFs(false);
+      else if(stack.length)history.back();
+      else if(tab!=='home')setTab('home');
+      else AppP.exitApp();
+    });
+  }
+}catch(e){}
 </script>
 </body>
 </html>
