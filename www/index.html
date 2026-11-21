@@ -511,7 +511,7 @@ function startSource(s){
   if(s.type==='hls'&&window.Hls&&Hls.isSupported()){
     hls=new Hls({maxBufferLength:30});
     hls.loadSource(s.url);hls.attachMedia(v);
-    hls.on(Hls.Events.ERROR,(ev,data)=>{if(data.fatal)setMsg('No se pudo reproducir esta fuente. Prueba otra.')});
+    hls.on(Hls.Events.ERROR,(ev,data)=>{if(data.fatal)setMsg('No se pudo reproducir (HLS: '+data.type+' / '+data.details+(data.response?' / HTTP '+data.response.code:'')+')')});
   }else v.src=s.url;
   const key=P.key?P.key(P.idx):null;
   v.addEventListener('loadedmetadata',()=>{
@@ -527,7 +527,7 @@ function startSource(s){
   v.addEventListener('pause',()=>{$('#pPlay').textContent='▶';stage.classList.add('show')});
   v.addEventListener('waiting',()=>setMsg('Cargando…'));
   v.addEventListener('playing',()=>setMsg(''));
-  v.addEventListener('error',()=>setMsg('No se pudo reproducir esta fuente. Prueba otra.'));
+  v.addEventListener('error',()=>{const c=v.error?v.error.code:0;setMsg('No se pudo reproducir (código '+c+(c===2?': red o servidor bloqueado':c===3?': video dañado':c===4?': enlace o formato no válido':'')+')')});
   v.addEventListener('ended',()=>{
     if(key){PROG[key]={t:v.duration,d:v.duration,done:true};saveProg()}
     if(P.idx<P.list.length-1)loadEp(P.idx+1);
