@@ -107,6 +107,10 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 #pMsg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px;font-size:14px;color:#ddd;pointer-events:none}
 #hud{position:absolute;top:14%;left:50%;transform:translateX(-50%);background:#000b;color:#fff;font-size:15px;font-weight:700;padding:9px 16px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .15s;white-space:nowrap}
 #hud.on{opacity:1}
+#pReveal{display:none;position:absolute;top:0;left:0;right:0;height:44px;background:none;border:0;padding:0}
+#stage.novid.clean #pReveal{display:block}
+#stage.novid.clean #ctl{opacity:0}
+#stage.novid.clean #pBack,#stage.novid.clean .tools{pointer-events:none}
 .frow{display:flex;gap:8px;overflow-x:auto;margin:-6px 0 14px;padding-bottom:4px}
 .fchip{flex:none;background:none;border:1.5px solid #ffffff2e;border-radius:12px;padding:10px 14px;font-size:14px;font-weight:600}
 .fchip.on{border-color:var(--ac);color:var(--ac)}
@@ -160,6 +164,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
     <button id="pUnlock" hidden aria-label="Desbloquear">🔓</button>
     <div id="pMsg"></div>
     <div id="hud"></div>
+    <button id="pReveal" aria-label="Mostrar opciones"></button>
   </div>
 </section>
 
@@ -576,7 +581,7 @@ $('#shX').onclick=closeSheet;
 const _wopen=window.open.bind(window);
 window.open=()=>null;
 const openExt=u=>{_wopen(u,'_blank')};
-let P=null,hls=null,vid=null,hideT=null,seeking=false,lastSave=0,isFs=false,locked=false,curK=-1,hudT=null,unlT=null;
+let P=null,hls=null,vid=null,hideT=null,seeking=false,lastSave=0,isFs=false,locked=false,curK=-1,hudT=null,unlT=null,cleanT=null;
 let bright=LS.get('bri',1),vol=LS.get('vol',1),fitI=LS.get('fit',0);
 const FITS=[['contain','Ajustar'],['cover','Rellenar'],['fill','Estirar']];
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -591,17 +596,30 @@ function applyFit(){
   $('#pFit').textContent='Escala: '+FITS[fitI][1];
   if(vid)vid.style.objectFit=mode;
   const f=$('#vbox iframe');
-  if(f){
-    /* reproductor incrustado: se escala toda su ventana suponiendo video 16:9 */
-    const st=$('#stage'),r=(st.clientWidth/Math.max(1,st.clientHeight))/(16/9);
-    let t='';
-    if(mode==='cover')t='scale('+Math.max(r,1/r)+')';
-    else if(mode==='fill')t=r>=1?'scale('+r+',1)':'scale(1,'+(1/r)+')';
-    f.style.transformOrigin='center center';f.style.transform=t;
+  if(!f)return;
+  /* reproductor incrustado: la ventana se ajusta a 16:9 y se amplía hasta llenar la pantalla,
+     así su barra de tiempo queda completa de borde a borde */
+  const st=$('#stage'),W=st.clientWidth,H=st.clientHeight;
+  if(mode==='contain'||W<50||H<50){f.removeAttribute('style');return}
+  const r=(W/H)/(16/9),s=f.style;
+  if(r>=1){
+    const Wi=H*16/9;
+    s.width=Wi+'px';s.height=H+'px';s.left=((W-Wi)/2)+'px';s.right='auto';s.top='0';s.bottom='auto';
+    s.transformOrigin=mode==='cover'?'center bottom':'center center';
+    s.transform=mode==='cover'?'scale('+r+')':'scale('+r+',1)';
+  }else{
+    const Hi=W*9/16;
+    s.width=W+'px';s.height=Hi+'px';s.left='0';s.right='auto';s.top=((H-Hi)/2)+'px';s.bottom='auto';
+    s.transformOrigin='center center';
+    s.transform=mode==='cover'?'scale('+(1/r)+')':'scale(1,'+(1/r)+')';
   }
 }
 window.addEventListener('resize',()=>{if(P)applyFit()});
 function applyBright(){if(vid)vid.style.filter=bright===1?'':'brightness('+bright+')';updBars()}
+function armClean(){
+  clearTimeout(cleanT);
+  cleanT=setTimeout(()=>{if($('#vbox iframe')&&$('#sheet').hidden)$('#stage').classList.add('clean')},3000);
+}
 function hud(t){const e=$('#hud');e.textContent=t;e.classList.add('on');clearTimeout(hudT)}
 function hideHud(ms){clearTimeout(hudT);hudT=setTimeout(()=>$('#hud').classList.remove('on'),ms||500)}
 async function setFs(on){
@@ -647,7 +665,7 @@ function pickSrc(k){
 function cleanupVideo(){
   if(hls){try{hls.destroy()}catch(e){}hls=null}
   if(vid){try{vid.pause();vid.removeAttribute('src');vid.load()}catch(e){}}
-  vid=null;$('#vbox').innerHTML='';
+  vid=null;$('#vbox').innerHTML='';clearTimeout(cleanT);$('#stage').classList.remove('clean');
 }
 function startSource(s){
   cleanupVideo();setMsg('');
@@ -655,7 +673,7 @@ function startSource(s){
   if(s.type==='embed'){
     stage.classList.add('novid');
     box.innerHTML='<iframe src="'+esc(s.url)+'" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
-    applyFit();
+    applyFit();armClean();
     return;
   }
   stage.classList.remove('novid');stage.classList.add('show');
@@ -722,6 +740,15 @@ $('#pQ').onclick=()=>{
   if(!P||!P.srcs||!P.srcs.length)return toast('Aún no hay fuentes');
   openSheet({title:'Servidor',items:P.srcs.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),on:k===curK})),multi:false,keep:true,onPick:k=>{if(k!=null){P.pref=P.srcs[k].label||null;pickSrc(k)}}});
 };
+
+/* reproductor incrustado: las opciones se ocultan solas o al tocar el video; la franja de arriba las vuelve a mostrar */
+$('#pReveal').onclick=()=>{$('#stage').classList.remove('clean');window.focus();armClean()};
+window.addEventListener('blur',()=>{
+  setTimeout(()=>{
+    const a=document.activeElement;
+    if(P&&a&&a.tagName==='IFRAME'){clearTimeout(cleanT);$('#stage').classList.add('clean')}
+  },0);
+});
 
 /* ---- gestos: izquierda=brillo, derecha=volumen, horizontal=adelantar/atrasar, doble toque=±10 s ---- */
 let G=null,tapT=0,tapTimer=null;
