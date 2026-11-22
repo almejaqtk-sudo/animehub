@@ -183,7 +183,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 
 <div id="toast"></div>
 
-<script src="hls.min.js"></script>
+<script src="hls.min.js" onerror="var h=document.createElement('script');h.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';document.head.appendChild(h)"></script>
 <script>
 "use strict";
 /* ============ utilidades ============ */
@@ -196,9 +196,10 @@ let toastT;
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('on'),2600)}
 
 /* ============ API que reciben los módulos ============ */
+const httpErr=r=>{const e=new Error('HTTP '+r.status);e.status=r.status;return e};
 const api={
-  async text(url,opt){const r=await fetch(url,opt);if(!r.ok)throw new Error('HTTP '+r.status);return r.text()},
-  async json(url,opt){const r=await fetch(url,opt);if(!r.ok)throw new Error('HTTP '+r.status);return r.json()},
+  async text(url,opt){const r=await fetch(url,opt);if(!r.ok)throw httpErr(r);return r.text()},
+  async json(url,opt){const r=await fetch(url,opt);if(!r.ok)throw httpErr(r);return r.json()},
   async html(url,opt){return new DOMParser().parseFromString(await api.text(url,opt),'text/html')},
   abs(rel,base){try{return new URL(rel,base).href}catch(e){return rel}}
 };
@@ -262,10 +263,17 @@ return {
     return [{ title: 'Nombre', cover: 'https://.../portada.jpg', url: 'id-o-enlace', sub: 'TV · 2024' }];
   },
 
-  // Filtros opcionales para la pestaña Buscar (género, tipo, estado...). Quita esta línea si no los necesitas.
-  filters: [{ id: 'genre', label: 'Género', options: [{ v: 'accion', t: 'Acción' }, { v: 'comedia', t: 'Comedia' }] }],
+  // FILTROS de la barra superior (Género / Tipo / Estado). Pon aquí los géneros, tipos y estados REALES de la web.
+  //   id: 'genre' | 'type' | 'status'   v = valor que usa la web (slug o id)   t = nombre que se ve
+  // Si prefieres leerlos de la propia web, en lugar de 'filters' define: async getFilters() { return [ ...mismo formato... ]; }
+  filters: [
+    { id: 'genre', label: 'Género', options: [{ v: 'accion', t: 'Acción' }, { v: 'comedia', t: 'Comedia' }] },
+    { id: 'type', label: 'Tipo', options: [{ v: 'pelicula', t: 'Película' }, { v: 'serie', t: 'Serie' }] },
+    { id: 'status', label: 'Estado', options: [{ v: 'emision', t: 'En emisión' }, { v: 'finalizado', t: 'Finalizado' }] }
+  ],
 
-  // Búsqueda. filters trae lo elegido, por ejemplo { genre: ['accion'] }. query puede venir vacío.
+  // Búsqueda. filters trae lo elegido, por ejemplo { genre: ['accion'], type: ['serie'] }. query puede venir vacío.
+  // Si ya no hay más páginas devuelve [] (no lances error). Respeta siempre el número de página.
   async search(query, page, filters) {
     return [{ title: 'Nombre', cover: 'https://.../portada.jpg', url: 'id-o-enlace' }];
   },
@@ -285,6 +293,55 @@ return {
     return [{ label: 'HD', url: 'https://.../video.m3u8', type: 'hls' }];
   }
 };`;
+
+/* ============ filtros (Género / Tipo / Estado) para cualquier módulo ============ */
+const DEFAULT_FILTERS=[
+  {id:'genre',label:'Género',options:[['accion','Acción'],['aventura','Aventura'],['animacion','Animación'],['ciencia-ficcion','Ciencia ficción'],['comedia','Comedia'],['crimen','Crimen'],['drama','Drama'],['familia','Familia'],['fantasia','Fantasía'],['guerra','Guerra'],['misterio','Misterio'],['musica','Música'],['romance','Romance'],['suspenso','Suspenso'],['terror','Terror']]},
+  {id:'type',label:'Tipo',options:[['pelicula','Película'],['serie','Serie'],['anime','Anime']]},
+  {id:'status',label:'Estado',options:[['emision','En emisión'],['finalizado','Finalizado']]}
+];
+const FLABEL={genre:'Género',genres:'Género',type:'Tipo',status:'Estado'};
+const FCACHE={},FDONE={};
+function normOpt(o){
+  if(o==null)return null;
+  if(Array.isArray(o))o={v:o[0],t:o[1]!=null?o[1]:o[0]};
+  if(typeof o!=='object')return{v:String(o),t:String(o)};
+  const v=[o.v,o.value,o.id,o.slug,o.key,o.t,o.label,o.name,o.title].find(x=>x!=null);
+  const t=[o.t,o.label,o.name,o.title,o.text,o.v,o.value,o.id].find(x=>x!=null);
+  return v==null?null:{v:String(v),t:String(t==null?v:t)};
+}
+function normFilters(raw){
+  if(!raw)return[];
+  if(!Array.isArray(raw))raw=Object.keys(raw).map(k=>({id:k,options:raw[k]}));
+  return raw.map((f,i)=>{
+    if(!f||typeof f!=='object')return null;
+    const ro=f.options||f.values||f.items,opts=(Array.isArray(ro)?ro:[]).map(normOpt).filter(Boolean);
+    if(!opts.length)return null;
+    const id=String(f.id||f.key||f.name||('f'+i));
+    return{id,label:String(f.label||FLABEL[id]||f.name||id),multi:f.multi,options:opts};
+  }).filter(Boolean);
+}
+function filtersOf(m){
+  if(FCACHE[m.id])return FCACHE[m.id];
+  let f=[];
+  try{f=normFilters(m.filters)}catch(e){console.error(e)}
+  if(!f.length)f=normFilters(DEFAULT_FILTERS);
+  FCACHE[m.id]=f;return f;
+}
+async function loadFilters(m){
+  if(FDONE[m.id]||typeof m.getFilters!=='function')return;
+  try{if(normFilters(m.filters).length)return}catch(e){}
+  FDONE[m.id]=1;
+  try{
+    const r=normFilters(await m.getFilters());
+    if(r.length){FCACHE[m.id]=r;if(cur().id===m.id)refreshBars()}
+  }catch(e){console.error('getFilters '+m.id,e)}
+}
+const isEnd=(e,p)=>p>1&&(e.status===404||/\b404\b/.test(String(e.message||'')));
+function dedupe(have,add,mod){
+  const seen=new Set(have.map(x=>x.url));
+  return(add||[]).filter(x=>x&&x.url!=null&&!seen.has(x.url)&&seen.add(x.url)).map(x=>Object.assign({},x,{mod}));
+}
 
 /* ============ gestión de módulos ============ */
 function compile(code){
@@ -312,7 +369,7 @@ function rebuildSel(){
 function installCode(code){
   const m=compile(code);
   installed=installed.filter(x=>x.id!==m.id);
-  installed.push({id:m.id,code});
+  installed.push({id:m.id,code});delete FCACHE[m.id];delete FDONE[m.id];
   LS.set('mods',installed);
   loadMods();toast('Módulo instalado: '+m.name);
 }
@@ -365,7 +422,7 @@ const hAny=()=>Object.keys(HF).some(k=>(HF[k]||[]).length);
 const hN=id=>(HF[id]||[]).length;
 const SEARCH_SVG='<svg viewBox="0 0 24 24" width="26" height="26"><path fill="currentColor" d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 14 15.5l.3.3v.8l5 5 1.5-1.5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>';
 function homeBar(){
-  const fl=cur().filters||[];
+  const fl=filtersOf(cur());
   return '<div class="frow"><button type="button" class="sico" id="hSearch" aria-label="Buscar">'+SEARCH_SVG+'</button>'
     +fl.map(f=>'<button type="button" class="fchip'+(hN(f.id)?' on':'')+'" data-h="'+esc(f.id)+'">'+esc(f.label)+' ('+hN(f.id)+') ▾</button>').join('')+'</div>';
 }
@@ -376,30 +433,38 @@ function bindHomeBar(){
 }
 let homeSt={mod:null};
 async function rHome(){
-  const m=cur();
+  const m=cur();loadFilters(m);
   if(homeSt.mod!==m.id)homeSt={mod:m.id,items:[],page:0,done:false,loading:false,err:''};
   if(!homeSt.items.length&&!homeSt.done){$('#main').innerHTML=homeBar()+skeleton();bindHomeBar();await loadHome();return}
   drawHome();
 }
 async function loadHome(){
   const st=homeSt,m=cur();
-  if(st.loading)return;st.loading=true;
+  if(st.loading)return;st.loading=true;st.err='';
   try{
     const p=st.page+1;
-    const r=((typeof m.home==='function'&&!hAny())?await m.home(p):await m.search('',p,HF))||[];
+    let r;
+    if(typeof m.home==='function'&&!hAny())r=await m.home(p);
+    else if(typeof m.search==='function')r=await m.search('',p,HF);
+    else throw new Error('Este módulo no admite filtros.');
     if(st!==homeSt)return;
-    st.page=p;if(!r.length)st.done=true;
-    st.items.push(...r.map(x=>Object.assign({},x,{mod:m.id})));
-  }catch(e){st.err=e.message;st.done=true}
+    const add=dedupe(st.items,r,m.id);
+    st.page=p;if(!add.length)st.done=true;
+    st.items.push(...add);
+  }catch(e){
+    if(st!==homeSt)return;
+    if(isEnd(e,st.page+1))st.done=true;else st.err=e.message;
+  }
   st.loading=false;
   if(tab==='home'&&st===homeSt)drawHome();
 }
 function drawHome(){
   const st=homeSt,mn=$('#main'),y=mn.scrollTop;
   mn.innerHTML=homeBar()+(st.items.length?grid(st.items):'')
-    +(st.err?'<p class="empty">No se pudo cargar: '+esc(st.err)+'</p>':'')
+    +(st.err?'<p class="empty">'+(st.items.length?'No se pudo cargar más: ':'No se pudo cargar: ')+esc(st.err)+'</p>':'')
     +(!st.items.length&&!st.err?'<p class="empty">'+(hAny()?'Sin resultados con esos filtros.':'Este módulo no tiene pantalla de inicio. Usa la pestaña Buscar.')+'</p>':'')
-    +(!st.done&&st.items.length?'<button class="btn more" id="more">Cargar más</button>':'');
+    +(!st.done&&(st.items.length||st.err)?'<button class="btn more" id="more">'+(st.err?'Reintentar':'Cargar más')+'</button>':'')
+    +(st.done&&st.items.length?'<p class="note" style="text-align:center;margin:18px 0">No hay más resultados</p>':'');
   mn.scrollTop=y;bindHomeBar();
   const mb=$('#more');if(mb)mb.onclick=()=>{mb.textContent='Cargando…';loadHome()};
 }
@@ -408,18 +473,29 @@ function drawHome(){
 let S={q:'',items:[],page:0,done:false,err:''},SF={};
 const nSel=id=>(SF[id]||[]).length;
 const anyFilter=()=>Object.keys(SF).some(k=>(SF[k]||[]).length);
+function sBar(){
+  return '<div class="frow">'+filtersOf(cur()).map(f=>'<button type="button" class="fchip'+(nSel(f.id)?' on':'')+'" data-f="'+esc(f.id)+'">'+esc(f.label)+' ('+nSel(f.id)+') ▾</button>').join('')+'</div>';
+}
+function bindSearchBar(){
+  document.querySelectorAll('.fchip[data-f]').forEach(b=>{b.onclick=()=>openFilter(b.dataset.f,SF,()=>{S.q=$('#sq')?$('#sq').value.trim():S.q;rSearch();doSearch(1)})});
+}
 function rSearch(){
-  const m=cur(),fl=m.filters||[];
+  const m=cur();loadFilters(m);
   $('#main').innerHTML='<form id="sf" class="sbar"><input id="sq" type="search" placeholder="Buscar en '+esc(m.name)+'" enterkeyhint="search"><button>Buscar</button></form>'
-    +(fl.length?'<div class="frow">'+fl.map(f=>'<button type="button" class="fchip'+(nSel(f.id)?' on':'')+'" data-f="'+esc(f.id)+'">'+esc(f.label)+' ('+nSel(f.id)+') ▾</button>').join('')+'</div>':'')
-    +'<div id="sres"></div>';
+    +sBar()+'<div id="sres"></div>';
   $('#sq').value=S.q;
   $('#sf').onsubmit=e=>{e.preventDefault();$('#sq').blur();doSearch(1)};
-  document.querySelectorAll('.fchip[data-f]').forEach(b=>{b.onclick=()=>openFilter(b.dataset.f,SF,()=>{S.q=$('#sq')?$('#sq').value.trim():S.q;rSearch();doSearch(1)})});
+  bindSearchBar();
   drawSearch();
 }
+function refreshBars(){
+  const old=$('#main .frow');if(!old)return;
+  const t=document.createElement('div');
+  if(tab==='home'){t.innerHTML=homeBar();old.replaceWith(t.firstChild);bindHomeBar()}
+  else if(tab==='search'){t.innerHTML=sBar();old.replaceWith(t.firstChild);bindSearchBar()}
+}
 function openFilter(id,store,after){
-  const m=cur(),f=(m.filters||[]).find(x=>x.id===id);if(!f)return;
+  const m=cur(),f=filtersOf(m).find(x=>x.id===id);if(!f)return;
   const sel=store[id]||[];
   const items=f.options.map(o=>({k:o.v,label:o.t,on:sel.indexOf(o.v)>=0}));
   const done=keys=>{store[id]=keys;after()};
@@ -430,24 +506,33 @@ async function doSearch(p){
   if(p===1){
     const q=$('#sq')?$('#sq').value.trim():S.q;
     if(!q&&!anyFilter())return toast('Escribe un nombre o elige filtros');
-    S={q,items:[],page:0,done:false,err:''};
+    S={q,items:[],page:0,done:false,err:'',busy:false};
     if($('#sres'))$('#sres').innerHTML=skeleton();
   }
+  const st=S;
+  if(st.busy)return;st.busy=true;st.err='';
   try{
-    const r=(await m.search(S.q,p,SF))||[];
-    S.page=p;if(!r.length)S.done=true;
-    S.items.push(...r.map(x=>Object.assign({},x,{mod:m.id})));
-  }catch(e){S.err=e.message;S.done=true}
-  if(tab==='search')drawSearch();
+    const r=await m.search(st.q,p,SF);
+    if(st!==S)return;
+    const add=dedupe(st.items,r,m.id);
+    st.page=p;if(!add.length)st.done=true;
+    st.items.push(...add);
+  }catch(e){
+    if(st!==S)return;
+    if(isEnd(e,p))st.done=true;else st.err=e.message;
+  }
+  st.busy=false;
+  if(tab==='search'&&st===S)drawSearch();
 }
 function drawSearch(){
   const box=$('#sres');if(!box)return;
   const has=S.q||anyFilter();
   box.innerHTML=(S.items.length?grid(S.items):'')
-    +(S.err?'<p class="empty">No se pudo buscar: '+esc(S.err)+'</p>':'')
+    +(S.err?'<p class="empty">'+(S.items.length?'No se pudo cargar más: ':'No se pudo buscar: ')+esc(S.err)+'</p>':'')
     +(has&&!S.items.length&&!S.err?'<p class="empty">Sin resultados.</p>':'')
-    +(!has?'<p class="empty">Escribe el nombre de un anime o elige filtros de género, tipo y estado.</p>':'')
-    +(has&&!S.done&&S.items.length?'<button class="btn more" id="smore">Cargar más</button>':'');
+    +(!has?'<p class="empty">Escribe el nombre o elige filtros de género, tipo y estado.</p>':'')
+    +(has&&!S.done&&(S.items.length||S.err)?'<button class="btn more" id="smore">'+(S.err?'Reintentar':'Cargar más')+'</button>':'')
+    +(has&&S.done&&S.items.length?'<p class="note" style="text-align:center;margin:18px 0">No hay más resultados</p>':'');
   const b=$('#smore');if(b)b.onclick=()=>{b.textContent='Cargando…';doSearch(S.page+1)};
 }
 
@@ -588,7 +673,7 @@ function openSheet(o){
   $('#shClear').onclick=()=>{o.items.forEach(x=>x.on=false);draw()};
   $('#shApply').onclick=()=>{closeSheet();if(o.onApply)o.onApply(o.items.filter(x=>x.on).map(x=>x.k))};
   $('#sheet').hidden=false;
-  const cur=L.querySelector('.on');if(cur&&cur.scrollIntoView)cur.scrollIntoView({block:'center'});
+  const onRow=L.querySelector('.on');if(onRow&&onRow.scrollIntoView)onRow.scrollIntoView({block:'center'});
 }
 function closeSheet(){$('#sheet').hidden=true}
 $('#sheet .sh-bg').onclick=closeSheet;
