@@ -76,6 +76,12 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 .sh-row .tag{margin-left:auto;flex:none;font-style:normal;font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px;background:var(--card2);color:var(--ac)}
 .sh-row .tag.lat{color:var(--ok)}
 .sh-row .tag .fl{font-size:17px;line-height:1;vertical-align:-2px}
+.sec{margin:16px 4px 8px;font-size:19px;font-weight:700}
+.cn{padding:0 10px 10px;color:var(--ac);font-weight:700;font-size:13px;text-align:left}
+.days{display:flex;overflow-x:auto;gap:4px;border-bottom:1px solid var(--card2);margin:6px 0 12px;scrollbar-width:none}
+.days::-webkit-scrollbar{display:none}
+.days button{flex:none;background:none;border:0;color:var(--mut);font-weight:700;letter-spacing:1px;padding:12px 14px;border-bottom:3px solid transparent}
+.days button.on{color:var(--ac);border-bottom-color:var(--ac)}
 .dhead .dhimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #player{z-index:20;background:#000;overflow:hidden;--pl:#b9c6ff}
 #stage{position:absolute;inset:0;background:#000;user-select:none;touch-action:none}
@@ -502,6 +508,80 @@ function extractEpisodes(doc, htmlText, animeUrl) {
   return episodes;
 }
 
+/* ---------- HORARIO SEMANAL (/horario) ---------- */
+const WEEK = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+const WEEK_LABEL = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
+
+function dayOf(text) {
+  const n = String(text || '').replace(/\s+/g, ' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  if (!n || n.length > 20) return '';
+  const m = n.match(/^(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/);
+  return m ? m[1] : '';
+}
+
+function scheduleCard(a, baseUrl) {
+  let u;
+  try { u = new URL(api.abs(a.getAttribute('href') || '', baseUrl)); } catch (_) { return null; }
+  if (!/^\/media\/[^/]+\/?$/.test(u.pathname)) return null; // solo fichas de anime, no episodios
+  const box = a.closest('article, li') || a;
+  const img = a.querySelector('img') || box.querySelector('img');
+  const title = (
+    a.querySelector('h2, h3, h4, .title')?.textContent ||
+    box.querySelector('h2, h3, h4, .title')?.textContent ||
+    img?.getAttribute('alt') ||
+    a.getAttribute('title') ||
+    a.textContent ||
+    ''
+  ).replace(/\s+/g, ' ').trim();
+  if (!title) return null;
+  const raw = img ? img.getAttribute('data-src') || img.getAttribute('src') || '' : '';
+  return { title, cover: raw && !/^data:/i.test(raw) ? api.abs(raw, baseUrl) : '', url: u.href };
+}
+
+function parseSchedule(doc, baseUrl) {
+  const byDay = {};
+  const push = (day, item) => {
+    if (!day || !item) return;
+    const list = (byDay[day] = byDay[day] || []);
+    if (!list.some((x) => x.url === item.url)) list.push(item);
+  };
+  const result = () =>
+    WEEK.filter((d) => byDay[d] && byDay[d].length).map((d) => ({ day: WEEK_LABEL[d], items: byDay[d] }));
+
+  // A) pestañas que apuntan a su panel (aria-controls, href="#id" o data-target)
+  doc.querySelectorAll('[role="tab"], [data-day], [data-tab], a[href^="#"], button').forEach((tab) => {
+    const day = dayOf(tab.textContent);
+    if (!day) return;
+    const id = (tab.getAttribute('aria-controls') || tab.getAttribute('data-target') || tab.getAttribute('href') || '').replace(/^#/, '');
+    const panel = id ? doc.getElementById(id) : null;
+    if (panel) panel.querySelectorAll('a[href*="/media/"]').forEach((a) => push(day, scheduleCard(a, baseUrl)));
+  });
+  if (Object.keys(byDay).length >= 2) return result();
+
+  // B) encabezados de día seguidos de sus tarjetas, en orden de documento
+  Object.keys(byDay).forEach((k) => delete byDay[k]);
+  let current = '';
+  doc.body.querySelectorAll('*').forEach((el) => {
+    if (el.children.length === 0) {
+      const d = dayOf(el.textContent);
+      if (d) { current = d; return; }
+    }
+    if (current && el.matches('a[href*="/media/"]')) push(current, scheduleCard(el, baseUrl));
+  });
+  if (Object.keys(byDay).length >= 2) return result();
+
+  // C) un contenedor con 7 paneles (lunes → domingo)
+  Object.keys(byDay).forEach((k) => delete byDay[k]);
+  for (const el of Array.from(doc.body.querySelectorAll('*'))) {
+    if (el.children.length !== 7) continue;
+    const kids = Array.from(el.children);
+    if (kids.filter((k) => k.querySelector('a[href*="/media/"]')).length < 4) continue;
+    kids.forEach((k, i) => k.querySelectorAll('a[href*="/media/"]').forEach((a) => push(WEEK[i], scheduleCard(a, baseUrl))));
+    break;
+  }
+  return result();
+}
+
 return {
   id: 'animeav1',
   name: 'AnimeAV1',
@@ -518,6 +598,16 @@ return {
       if (page > 1 && isNotFound(e)) return []; // ya no hay más páginas
       throw e;
     }
+  },
+
+  // Animes en emisión agrupados por día de la semana
+  async schedule() {
+    const url = api.abs('/horario', BASE_URL);
+    const html = await api.text(url);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const days = parseSchedule(doc, url);
+    if (days.length === 0) throw new Error('No se pudo leer el horario de la web');
+    return days;
   },
 
   async search(query, page = 1, filters = {}) {
@@ -889,7 +979,7 @@ function setTab(t){
 function render(){({home:rHome,search:rSearch,favs:rFavs,mods:rMods})[tab]()}
 const skeleton=()=>'<div class="grid">'+'<div class="sk"></div>'.repeat(9)+'</div>';
 function grid(items){
-  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(i.title)+'</div>'+'</button>').join('')+'</div>';
+  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(i.title)+'</div>'+(i.note?'<div class="cn">'+esc(i.note)+'</div>':'')+'</button>').join('')+'</div>';
 }
 $('#main').addEventListener('click',e=>{
   const c=e.target.closest('.card');
@@ -897,6 +987,65 @@ $('#main').addEventListener('click',e=>{
 });
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)setTab(b.dataset.t)});
 $('#modSel').addEventListener('change',e=>{LS.set('active',e.target.value);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};render()});
+
+/* ---- horario semanal (módulos con schedule() y filtro Estado = En emisión) ---- */
+const DAY_NAMES=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+const normD=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+let SCHED={day:''};
+function schedActive(F){
+  const m=cur();
+  return typeof m.schedule==='function'&&(F.status||[]).some(v=>/emisi/i.test(v))&&Object.keys(F).every(k=>k==='status'||!(F[k]||[]).length);
+}
+async function showSchedule(el){
+  if(!el)return;const m=cur();
+  el.innerHTML='<p class="empty">Cargando horario…</p>';
+  let days;
+  try{days=await cached('s|'+m.id,30*60*1000,()=>m.schedule())}
+  catch(e){el.innerHTML='<p class="empty">No se pudo cargar el horario: '+esc(e.message)+'</p><button class="btn" id="schRetry">Reintentar</button>';const b=$('#schRetry');if(b)b.onclick=()=>showSchedule(el);return}
+  days=(days||[]).filter(d=>d&&d.items&&d.items.length);
+  if(!days.length){el.innerHTML='<p class="empty">El horario está vacío.</p>';return}
+  const today=normD(DAY_NAMES[new Date().getDay()]);
+  if(!days.some(d=>normD(d.day)===SCHED.day))SCHED.day=normD((days.find(d=>normD(d.day)===today)||days[0]).day);
+  const draw=()=>{
+    const sel=days.find(d=>normD(d.day)===SCHED.day)||days[0];
+    el.innerHTML='<div class="days">'+days.map(d=>'<button type="button" data-d="'+esc(normD(d.day))+'" class="'+(normD(d.day)===SCHED.day?'on':'')+'">'+esc(String(d.day).toUpperCase())+'</button>').join('')+'</div>'+grid(sel.items.map(i=>Object.assign({},i,{mod:m.id})));
+    const dv=el.querySelector('.days'),on=el.querySelector('.days .on');
+    if(dv&&on)dv.scrollLeft=on.offsetLeft-dv.clientWidth/2+on.clientWidth/2;
+  };
+  el.onclick=e=>{const b=e.target.closest('.days button');if(b){SCHED.day=b.dataset.d;draw()}};
+  draw();
+}
+
+/* ---- "Seguir mirando": episodios nuevos de lo que ya estás viendo ---- */
+function followList(){
+  const f=homeSt.follow;if(!f||!f.rows)return [];
+  const m=cur(),out=[];
+  for(const r of f.rows){
+    const eps=(r.d&&r.d.episodes)||[];
+    let last=-1;eps.forEach((e,i)=>{if(viewed(PROG[epKey(m,e)]))last=i});
+    if(last<0||last>=eps.length-1)continue;
+    const nx=eps[last+1];
+    out.push({mod:m.id,url:r.url,title:r.title||(r.d&&r.d.title)||'',cover:pickCover(r.d,r),note:'Episodio '+(nx.number||last+2)});
+  }
+  return out.slice(0,6);
+}
+async function loadFollow(){
+  const st=homeSt,m=cur();if(st.follow)return;
+  const seen=new Set(),cands=[];
+  hist.concat(favs).forEach(x=>{if(x&&x.mod===m.id&&!seen.has(x.url)){seen.add(x.url);cands.push(x)}});
+  st.follow={rows:[]};
+  const pick=cands.slice(0,12);
+  await Promise.all(pick.map(async x=>{
+    try{const d=await cached('d|'+m.id+'|'+x.url,5*60*1000,()=>m.details(x.url));st.follow.rows.push({url:x.url,title:x.title||d.title,cover:x.cover,d})}catch(e){}
+  }));
+  st.follow.rows.sort((a,b)=>pick.findIndex(x=>x.url===a.url)-pick.findIndex(x=>x.url===b.url));
+  if(tab==='home'&&st===homeSt&&followList().length)drawHome();
+}
+function followHtml(){
+  if(hAny())return '';
+  const f=followList();
+  return f.length?'<h2 class="sec">Seguir mirando</h2>'+grid(f)+'<h2 class="sec">Explorar</h2>':'';
+}
 
 /* ---- Inicio ---- */
 let HF={};
@@ -917,6 +1066,7 @@ function bindHomeBar(){
 let homeSt={mod:null};
 async function rHome(){
   const m=cur();loadFilters(m);
+  if(schedActive(HF)){$('#main').innerHTML=homeBar()+'<div id="sched"></div>';bindHomeBar();showSchedule($('#sched'));return}
   if(homeSt.mod!==m.id)homeSt={mod:m.id,items:[],page:0,done:false,loading:false,err:''};
   if(!homeSt.items.length&&!homeSt.done){$('#main').innerHTML=homeBar()+skeleton();bindHomeBar();await loadHome();return}
   drawHome();
@@ -943,12 +1093,13 @@ async function loadHome(){
 }
 function drawHome(){
   const st=homeSt,mn=$('#main'),y=mn.scrollTop;
-  mn.innerHTML=homeBar()+(st.items.length?grid(st.items):'')
+  mn.innerHTML=homeBar()+followHtml()+(st.items.length?grid(st.items):'')
     +(st.err?'<p class="empty">'+(st.items.length?'No se pudo cargar más: ':'No se pudo cargar: ')+esc(st.err)+'</p>':'')
     +(!st.items.length&&!st.err?'<p class="empty">'+(hAny()?'Sin resultados con esos filtros.':'Este módulo no tiene pantalla de inicio. Usa la pestaña Buscar.')+'</p>':'')
     +(!st.done&&(st.items.length||st.err)?'<button class="btn more" id="more">'+(st.err?'Reintentar':'Cargar más')+'</button>':'')
     +(st.done&&st.items.length?'<p class="note" style="text-align:center;margin:18px 0">No hay más resultados</p>':'');
   mn.scrollTop=y;bindHomeBar();
+  if(!hAny())loadFollow();
   const mb=$('#more');if(mb)mb.onclick=()=>{mb.textContent='Cargando…';loadHome()};
 }
 
@@ -991,6 +1142,7 @@ async function doSearch(p){
   if(p===1){
     const q=$('#sq')?$('#sq').value.trim():S.q;
     if(!q&&!anyFilter())return toast('Escribe un nombre o elige filtros');
+    if(!q&&schedActive(SF)){S={q:'',items:[],page:0,done:true,err:'',busy:false,sched:true};showSchedule($('#sres'));return}
     S={q,items:[],page:0,done:false,err:'',busy:false};
     if($('#sres'))$('#sres').innerHTML=skeleton();
   }
@@ -1010,6 +1162,7 @@ async function doSearch(p){
   if(tab==='search'&&st===S)drawSearch();
 }
 function drawSearch(){
+  if(S.sched){showSchedule($('#sres'));return}
   const box=$('#sres');if(!box)return;
   const has=S.q||anyFilter();
   box.innerHTML=(S.items.length?grid(S.items):'')
