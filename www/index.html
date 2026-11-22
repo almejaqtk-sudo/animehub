@@ -75,6 +75,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 .ep.viewed .chk{background:var(--ok);border-color:var(--ok);color:#08210f}
 .sh-row .tag{margin-left:auto;flex:none;font-style:normal;font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px;background:var(--card2);color:var(--ac)}
 .sh-row .tag.lat{color:var(--ok)}
+.sh-row .tag .fl{font-size:17px;line-height:1;vertical-align:-2px}
 .dhead .dhimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #player{z-index:20;background:#000;overflow:hidden;--pl:#b9c6ff}
 #stage{position:absolute;inset:0;background:#000;user-select:none;touch-action:none}
@@ -253,6 +254,7 @@ const isNotFound = (e) => !!e && (e.status === 404 || /\b404\b/.test(String(e.me
 
 /* ---------- SERVIDORES ---------- */
 const FAST_SERVERS = [
+  { priority: 0, name: 'HLS', match: /zilla-networks/i, type: 'embed' },
   { priority: 1, name: 'Streamwish', match: /(streamwish|wish|hglink|swiftplayers|alions|filelions|vidhide)/i, type: 'embed' },
   { priority: 2, name: 'Mp4upload', match: /mp4upload/i, type: 'embed' },
   { priority: 3, name: 'Okru', match: /(ok\.ru|od\.sdk|okcdn)/i, type: 'embed' },
@@ -303,7 +305,7 @@ function ctxLang(el) {
   let t = '';
   let n = el;
   for (let i = 0; i < 4 && n && n.getAttribute; i++) {
-    t += ' ' + ['data-lang', 'data-audio', 'data-language', 'data-idioma', 'id', 'class', 'aria-label', 'title']
+    t += ' ' + ['data-lang', 'data-audio', 'data-language', 'data-idioma', 'aria-label', 'title']
       .map((a) => n.getAttribute(a) || '').join(' ');
     if (i < 2) {
       const own = (n.textContent || '').replace(/\s+/g, ' ').trim();
@@ -628,7 +630,14 @@ return {
 
       if (!cleaned || cleaned.startsWith('data:') || cleaned.startsWith('javascript:')) return;
       const full = api.abs(cleaned, absUrl);
-      if (!full || seen.has(full)) return;
+      if (!full) return;
+      if (seen.has(full)) {
+        if (langHint) {
+          const ex = found.find((f) => f.url === full);
+          if (ex && !ex.lang) ex.lang = langHint;
+        }
+        return;
+      }
       seen.add(full);
 
       const classified = classifyFastServer(full);
@@ -661,9 +670,23 @@ return {
     });
 
     const unescaped = html.replace(/\\\//g, '/').replace(/\\u0026/g, '&');
-    const allUrls = unescaped.match(/https?:\/\/[^\s"'<>\\]+/gi) || [];
-    for (const u of allUrls) {
-      addSource(u);
+    // La web agrupa los servidores bajo "SUB" y "DUB": cada URL toma el último marcador que aparece antes
+    const markers = [];
+    const markerRe = /["']?\b(SUB|DUB)\b["']?\s*:/g;
+    let mk;
+    while ((mk = markerRe.exec(unescaped))) markers.push({ i: mk.index, lang: mk[1] });
+    const langAt = (idx) => {
+      let l = '';
+      for (const m of markers) {
+        if (m.i < idx) l = m.lang;
+        else break;
+      }
+      return l;
+    };
+    const urlRe = /https?:\/\/[^\s"'<>\\]+/gi;
+    let um;
+    while ((um = urlRe.exec(unescaped))) {
+      addSource(um[0], langAt(um.index));
     }
 
     found.sort((a, b) => a.priority - b.priority);
@@ -815,7 +838,7 @@ let installed=LS.get('mods',[]);
 let mods=[BUILTIN];
 function loadMods(){
   mods=[BUILTIN];
-  installed.forEach(it=>{try{mods.push(compile(it.code))}catch(e){console.error('Módulo '+it.id,e)}});
+  installed.forEach(it=>{try{const m=compile(it.code);if(m.id!==BUILTIN.id)mods.push(m)}catch(e){console.error('Módulo '+it.id,e)}});
   rebuildSel();
 }
 const modById=id=>mods.find(m=>m.id===id);
@@ -1090,7 +1113,7 @@ function cached(key,ttl,fn){
 /* ---- limpieza de servidores: quita publicidad, imágenes y clips cortos; etiqueta el idioma ---- */
 const SRC_ADS=/(doubleclick|googlesyndication|googleadservices|adservice|adsterra|popads|popcash|propeller|exoclick|juicyads|trafficjunky|trafficfactory|clickadu|hilltopads|onclickads|adcash|revcontent|taboola|outbrain|mgid|zeropark|a-ads|bidgear|adnxs|pubmatic|histats|google-analytics|googletagmanager|\/(ads?|adv|advert|banner|popunder|popup|vast|preroll|click|track|pixel|promo|sponsor)(?=[\/.?_-]|$)|[?&](ad|ads|adv)=)/i;
 const SRC_JUNK_DIRECT=/(thumb|poster|preview|cover|teaser|trailer|sample|promo|logo)/i;
-const SRC_TRUST=/(streamwish|hglink|swiftplayers|alions|filelions|vidhide|mp4upload|ok\.ru|okru|yourupload|filemoon|moonplayer|streamtape|strtape|strcloud|dood|ds2play|mega\.nz|mega\.io|voe\.sx|vidguard|vgfplay|uqload|mixdrop|streamhub|upstream|krakenfiles|pixeldrain|gofile|drive\.google|mediafire|1fichier|burstcloud|sendvid|vk\.com|rutube|dailymotion)/i;
+const SRC_TRUST=/(zilla-networks|streamwish|hglink|swiftplayers|alions|filelions|vidhide|mp4upload|ok\.ru|okru|yourupload|filemoon|moonplayer|streamtape|strtape|strcloud|dood|ds2play|mega\.nz|mega\.io|voe\.sx|vidguard|vgfplay|uqload|mixdrop|streamhub|upstream|krakenfiles|pixeldrain|gofile|drive\.google|mediafire|1fichier|burstcloud|sendvid|vk\.com|rutube|dailymotion)/i;
 function srcLang(s){
   const t=' '+((s.lang||'')+' '+(s.label||'')).toLowerCase()+' ';
   if(/\b(sub|subs|subtitulado|subtitulada|vose|jap)\b|sub[-_ ]?(esp|spa|es)/.test(t))return 'Sub español';
@@ -1104,7 +1127,8 @@ function nameSrcs(list){
     let host='';try{host=new URL(s.url).hostname.replace(/^www\./,'')}catch(e){}
     const base=(s.base||s.label||host||'Servidor').trim(),lang=srcLang(s);
     const k=base+'|'+lang;cnt[k]=(cnt[k]||0)+1;
-    return Object.assign({},s,{base,tag:lang,pk:k,label:base+(cnt[k]>1?' '+cnt[k]:'')});
+    const flag=lang==='Sub español'?'🇯🇵':lang==='Español latino'?'🇲🇽':lang==='Español'?'🇪🇸':'';
+    return Object.assign({},s,{base,tag:lang,flag,pk:k,label:base+(cnt[k]>1?' '+cnt[k]:'')});
   });
 }
 function shortClip(url){return new Promise(res=>{
@@ -1194,7 +1218,7 @@ async function playFrom(i){
   };
   if(srcs.length===1&&!hidden)return go(0);
   const show=(arr,hid)=>{
-    const items=arr.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),tag:s.tag,on:false}));
+    const items=arr.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),tag:s.tag,flag:s.flag,on:false}));
     if(hid>0)items.push({k:-1,label:'Mostrar todos ('+hid+' ocultos)',on:false});
     openSheet({title:'Elegir servidor',items,multi:false,keep:true,onPick:k=>{
       if(k==null)return;
@@ -1209,7 +1233,7 @@ async function playFrom(i){
 function openSheet(o){
   const L=$('#shL');
   $('#shT').textContent=o.title;
-  const draw=()=>{L.innerHTML=o.items.map((it,i)=>'<button class="sh-row'+(it.on?' on':'')+'" data-i="'+i+'"><span class="rb"></span><span>'+esc(it.label)+'</span>'+(it.tag?'<em class="tag'+(/latino/i.test(it.tag)?' lat':'')+'">'+esc(it.tag)+'</em>':'')+'</button>').join('')||'<p class="empty">Sin opciones.</p>'};
+  const draw=()=>{L.innerHTML=o.items.map((it,i)=>'<button class="sh-row'+(it.on?' on':'')+'" data-i="'+i+'"><span class="rb"></span><span>'+esc(it.label)+'</span>'+(it.tag?'<em class="tag'+(/latino/i.test(it.tag)?' lat':'')+'"><span class="fl">'+esc(it.flag||'')+'</span> '+esc(it.tag)+'</em>':'')+'</button>').join('')||'<p class="empty">Sin opciones.</p>'};
   draw();
   L.onclick=e=>{
     const b=e.target.closest('.sh-row');if(!b)return;
@@ -1393,7 +1417,7 @@ $('#pEps').onclick=()=>{
 $('#pQ').onclick=()=>{
   if(!P||!P.srcs||!P.srcs.length)return toast('Aún no hay fuentes');
   {
-    const items=P.srcs.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),tag:s.tag,on:k===curK}));
+    const items=P.srcs.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),tag:s.tag,flag:s.flag,on:k===curK}));
     const extra=P.rawAll?P.rawAll.length-P.srcs.length:0;
     if(extra>0)items.push({k:-1,label:'Mostrar todos ('+extra+' ocultos)',on:false});
     openSheet({title:'Servidor',items,multi:false,keep:true,onPick:k=>{
