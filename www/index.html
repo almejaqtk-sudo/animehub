@@ -193,7 +193,7 @@ const strip=h=>new DOMParser().parseFromString(String(h||'').replace(/<br\s*\/?>
 const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 const fmt=s=>{if(!isFinite(s)||s<0)return'0:00';s=Math.floor(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0')};
 let toastT;
-function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('on'),2600)}
+function toast(t,ms){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('on'),ms||2600)}
 
 /* ============ API que reciben los módulos ============ */
 const httpErr=r=>{const e=new Error('HTTP '+r.status);e.status=r.status;return e};
@@ -577,6 +577,7 @@ function rMods(){
    +'<h3>Instalar un módulo</h3>'
    +'<input id="mUrl" placeholder="Enlace al archivo .js del módulo"><button class="btn" id="mInstUrl">Instalar desde enlace</button>'
    +'<textarea id="mCode" rows="6" placeholder="…o pega aquí el código del módulo"></textarea><button class="btn" id="mInstCode">Instalar código pegado</button>'
+   +'<button class="btn ghost" id="mInstFile">Instalar desde archivo .js</button><input type="file" id="mFile" accept=".js,.txt,text/javascript,text/plain,application/javascript" hidden>'
    +'<button class="btn ghost" id="mTpl">Copiar plantilla para pedirle módulos a tu IA</button>'
    +'<p class="note">Un módulo es código que corre dentro de la app con acceso a internet. Instala solo módulos que hayas creado tú o de personas en las que confíes.</p>'
    +'<h3>Reproducir un enlace directo</h3>'
@@ -593,8 +594,9 @@ $('#main').addEventListener('click',async e=>{
   }
   else if(t.id==='mInstCode'){
     const c=$('#mCode').value.trim();if(!c)return toast('Pega el código primero');
-    try{installCode(c);rMods()}catch(err){toast('Error: '+err.message)}
+    try{installCode(c);rMods()}catch(err){toast('Error: '+err.message+(err instanceof SyntaxError?' · se pegaron '+c.length+' caracteres, termina en «'+c.slice(-25).replace(/\s+/g,' ')+'». Si no termina en "};" el texto se cortó: usa "Instalar desde archivo".':''),9000)}
   }
+  else if(t.id==='mInstFile'){$('#mFile').click()}
   else if(t.id==='mTpl'){
     try{await navigator.clipboard.writeText(TEMPLATE);toast('Plantilla copiada')}
     catch(err){$('#mCode').value=TEMPLATE;toast('Plantilla puesta en el cuadro de código')}
@@ -603,6 +605,14 @@ $('#main').addEventListener('click',async e=>{
     const u=$('#dUrl').value.trim();if(!/^https?:\/\//i.test(u))return toast('Escribe un enlace válido');
     openPlayer({title:'Enlace directo',list:[{title:'Video'}],idx:0,load:async()=>[{label:'Directo',url:u,type:guess(u)}],key:null});
   }
+});
+
+$('#main').addEventListener('change',async e=>{
+  if(e.target.id!=='mFile')return;
+  const f=e.target.files&&e.target.files[0];if(!f)return;
+  try{const code=(await f.text()).trim();installCode(code);rMods()}
+  catch(err){toast('Error: '+err.message,6000)}
+  e.target.value='';
 });
 
 /* ============ ficha del anime ============ */
