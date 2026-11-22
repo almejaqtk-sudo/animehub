@@ -37,6 +37,82 @@ jobs:
       - name: Permitir enlaces http
         run: sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
 
+      - name: Pantalla completa real (oculta barra de estado y de navegacion)
+        run: |
+          DIR=android/app/src/main/java/com/animehub/app
+          mkdir -p "$DIR"
+          cat > "$DIR/ImmersivePlugin.java" <<'JAVA_EOF'
+          package com.animehub.app;
+
+          import android.os.Build;
+          import android.view.Window;
+          import android.view.WindowManager;
+          import androidx.core.view.WindowCompat;
+          import androidx.core.view.WindowInsetsCompat;
+          import androidx.core.view.WindowInsetsControllerCompat;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "Immersive")
+          public class ImmersivePlugin extends Plugin {
+
+              @PluginMethod
+              public void enter(final PluginCall call) {
+                  getActivity().runOnUiThread(new Runnable() {
+                      @Override
+                      public void run() {
+                          Window w = getActivity().getWindow();
+                          if (Build.VERSION.SDK_INT >= 28) {
+                              WindowManager.LayoutParams lp = w.getAttributes();
+                              lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                              w.setAttributes(lp);
+                          }
+                          WindowCompat.setDecorFitsSystemWindows(w, false);
+                          WindowInsetsControllerCompat c = WindowCompat.getInsetsController(w, w.getDecorView());
+                          c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                          c.hide(WindowInsetsCompat.Type.systemBars());
+                          call.resolve();
+                      }
+                  });
+              }
+
+              @PluginMethod
+              public void exit(final PluginCall call) {
+                  getActivity().runOnUiThread(new Runnable() {
+                      @Override
+                      public void run() {
+                          Window w = getActivity().getWindow();
+                          WindowCompat.setDecorFitsSystemWindows(w, true);
+                          WindowInsetsControllerCompat c = WindowCompat.getInsetsController(w, w.getDecorView());
+                          c.show(WindowInsetsCompat.Type.systemBars());
+                          if (Build.VERSION.SDK_INT >= 28) {
+                              WindowManager.LayoutParams lp = w.getAttributes();
+                              lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+                              w.setAttributes(lp);
+                          }
+                          call.resolve();
+                      }
+                  });
+              }
+          }
+          JAVA_EOF
+          cat > "$DIR/MainActivity.java" <<'JAVA_EOF'
+          package com.animehub.app;
+
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(ImmersivePlugin.class);
+                  super.onCreate(savedInstanceState);
+              }
+          }
+          JAVA_EOF
+
       - name: Compilar
         working-directory: android
         run: |
@@ -56,4 +132,3 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: AnimeHub build ${{ github.run_number }}
           files: AnimeHub.apk
-          
