@@ -531,7 +531,7 @@ return {
   async details(url) {
     const absUrl = api.abs(url, BASE_URL);
     const htmlText = await api.text(absUrl);
-    const doc = await api.html(absUrl);
+    const doc = new DOMParser().parseFromString(htmlText, 'text/html');
 
     const title = pickText(doc, ['h1', '.anime-title', 'header h1', 'main h1']);
 
@@ -594,7 +594,7 @@ return {
   async videos(episodeUrl, ctx) {
     const absUrl = api.abs(episodeUrl, BASE_URL);
     const html = await api.text(absUrl);
-    const doc = await api.html(absUrl);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
 
     const found = [];
     const seen = new Set();
@@ -1042,7 +1042,7 @@ async function openDetail(modId,url,hint){
   setHead(hint.cover);
   $('#dBack').onclick=()=>history.back();
   try{
-    const d=await m.details(url);
+    const d=await cached('d|'+m.id+'|'+url,5*60*1000,()=>m.details(url));
     if(tok!==dTok||el.hidden)return;
     D={m,d,url,rev:false,hint};
     drawDetail();
@@ -1057,6 +1057,14 @@ const pickCover=(d,h)=>[d&&d.cover,h&&h.cover].find(u=>!badCover(u))||(d&&d.cove
 const viewed=p=>!!p&&(p.done||(p.seen&&!p.d));
 function markSeen(key){if(!key)return;const p=PROG[key]||{};if(p.done||p.seen)return;p.seen=true;PROG[key]=p;saveProg()}
 const epKey=(m,e)=>m.id+'|'+e.url;
+const CACHE=new Map();
+function cached(key,ttl,fn){
+  const c=CACHE.get(key);if(c&&Date.now()-c.t<ttl)return c.p;
+  const p=Promise.resolve().then(fn);CACHE.set(key,{t:Date.now(),p});
+  p.catch(()=>{if(CACHE.get(key)&&CACHE.get(key).p===p)CACHE.delete(key)});
+  return p;
+}
+const loadVideos=(m,d,ep)=>cached('v|'+m.id+'|'+ep.url,10*60*1000,()=>m.videos(ep.url,{detail:d,episode:ep}));
 function drawDetail(){
   const {m,d,url,hint}=D,el=$('#detail'),eps=d.episodes||[];
   const title=d.title||hint.title,cover=pickCover(d,hint);
@@ -1105,7 +1113,7 @@ async function playFrom(i){
   const cfg={
     title,list:d.episodes,idx:i,pref:null,
     key:k=>epKey(m,d.episodes[k]),
-    load:k=>m.videos(d.episodes[k].url,{detail:d,episode:d.episodes[k]})
+    load:k=>loadVideos(m,d,d.episodes[k])
   };
   busyPlay=true;toast('Buscando servidores…');
   let srcs;
@@ -1224,6 +1232,7 @@ async function loadEp(i){
   }
   if(pick<0){setMsg(srcs.length?'Estas fuentes se abren fuera de la app. Elige otra en Servidor.':'Este módulo no devolvió fuentes de video para este episodio.');return}
   pickSrc(pick);
+  if(i<P.list.length-1&&P.list.length>1){const nx=i+1,Pr=P;setTimeout(()=>{if(P===Pr&&Pr.load)Promise.resolve(Pr.load(nx)).catch(()=>{})},2500)}
 }
 function pickSrc(k){
   const s=P.srcs[k];
