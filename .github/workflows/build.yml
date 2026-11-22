@@ -34,6 +34,9 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Generar iconos de la app
+        run: npx --yes @capacitor/assets generate --android
+
       - name: Permitir enlaces http
         run: sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
 
