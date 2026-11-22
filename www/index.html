@@ -208,44 +208,454 @@ const api={
   abs(rel,base){try{return new URL(rel,base).href}catch(e){return rel}}
 };
 
-/* ============ módulo incluido: AniList (catálogo oficial) ============ */
-const ANI='https://graphql.anilist.co';
-async function aniQ(query,variables){
-  const r=await fetch(ANI,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({query,variables})});
-  const j=await r.json();if(j.errors)throw new Error(j.errors[0].message);return j.data;
-}
-const F='id title{romaji english} coverImage{extraLarge large} seasonYear format';
-const mapM=m=>({title:m.title.english||m.title.romaji,cover:m.coverImage.extraLarge||m.coverImage.large,url:String(m.id),sub:[m.format,m.seasonYear].filter(Boolean).join(' · ')});
-const GENRES=[['Action','Acción'],['tag:Martial Arts','Artes Marciales'],['tag:Cars','Autos'],['Adventure','Aventura'],['tag:School','Colegial'],['Comedy','Comedia'],['Slice of Life','Cosas de la vida'],['tag:Demons','Demonios'],['Drama','Drama'],['Fantasy','Fantasía'],['tag:Isekai','Isekai'],['Horror','Terror'],['Mahou Shoujo','Magia (Mahou Shoujo)'],['Mecha','Mecha'],['Music','Música'],['Mystery','Misterio'],['tag:Military','Militar'],['Psychological','Psicológico'],['Romance','Romance'],['Sci-Fi','Ciencia ficción'],['tag:Super Power','Superpoderes'],['Sports','Deportes'],['Supernatural','Sobrenatural'],['Thriller','Suspenso'],['tag:Vampire','Vampiros']].sort((a,b)=>a[1].localeCompare(b[1],'es'));
-const BUILTIN_FILTERS=[
-  {id:'genre',label:'Género',options:GENRES.map(g=>({v:g[0],t:g[1]}))},
-  {id:'type',label:'Tipo',options:[{v:'TV',t:'TV'},{v:'MOVIE',t:'Película'},{v:'OVA',t:'OVA'},{v:'ONA',t:'ONA'},{v:'SPECIAL',t:'Especial'}]},
-  {id:'status',label:'Estado',options:[{v:'RELEASING',t:'En emisión'},{v:'FINISHED',t:'Finalizado'},{v:'NOT_YET_RELEASED',t:'Próximamente'}]}
+/* ============ módulo principal incluido: AnimeAV1 ============ */
+const BUILTIN=(function(){
+const BASE_URL = 'https://animeav1.com';
+
+/* ---------- FILTROS (los mismos que tiene la web en /catalogo) ---------- */
+// Parámetro de URL que usa la web para cada filtro: /catalogo?genre=accion&status=emision&category=tv-anime&page=2
+const FILTER_PARAM = { genre: 'genre', type: 'category', status: 'status' };
+
+const slugify = (s) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[()]/g, '').trim().replace(/\s+/g, '-');
+
+// Géneros tal como los muestra la web. El valor (v) es el "slug" de la URL.
+// Si algún género no devuelve resultados, corrige aquí su slug: { v: 'slug-real', t: 'Nombre' }
+const GENRE_NAMES = [
+  'Acción', 'Antropomórfico', 'Artes Marciales', 'Aventura', 'Carreras', 'Ciencia Ficción', 'Comedia',
+  'Deportes', 'Detectives', 'Drama', 'Elenco adulto', 'Escolares', 'Espacial', 'Fantasía', 'Gastronomía',
+  'Gore', 'Harem', 'Histórico', 'Idols (Hombre)', 'Idols (Mujer)', 'Isekai', 'Josei', 'Juegos',
+  'Mahou Shoujo', 'Mecha', 'Militar', 'Misterio', 'Mitología', 'Música', 'Parodia', 'Psicológico',
+  'Recuentos de la vida', 'Romance', 'Samurai', 'Seinen', 'Shoujo', 'Shounen', 'Sobrenatural',
+  'Superpoderes', 'Suspenso', 'Terror', 'Vampiros', 'Yaoi', 'Yuri'
 ];
-const BUILTIN={
-  id:'anilist',name:'AniList (catálogo)',version:1,builtin:true,filters:BUILTIN_FILTERS,
-  async home(p){const d=await aniQ('query($p:Int){Page(page:$p,perPage:24){media(type:ANIME,sort:TRENDING_DESC,isAdult:false){'+F+'}}}',{p:p||1});return d.Page.media.map(mapM)},
-  async search(q,p,f){
-    f=f||{};const g=f.genre||[];
-    const genres=g.filter(x=>x.indexOf('tag:')!==0),tags=g.filter(x=>x.indexOf('tag:')===0).map(x=>x.slice(4));
-    const d=await aniQ('query($p:Int,$s:String,$g:[String],$t:[String],$f:[MediaFormat],$st:[MediaStatus],$so:[MediaSort]){Page(page:$p,perPage:24){media(type:ANIME,search:$s,genre_in:$g,tag_in:$t,format_in:$f,status_in:$st,sort:$so,isAdult:false){'+F+'}}}',
-      {p:p||1,s:q||null,g:genres.length?genres:null,t:tags.length?tags:null,f:(f.type&&f.type.length)?f.type:null,st:(f.status&&f.status.length)?f.status:null,so:[q?'SEARCH_MATCH':'POPULARITY_DESC']});
-    return d.Page.media.map(mapM);
+
+const FILTERS = [
+  { id: 'genre', label: 'Género', multi: false, options: GENRE_NAMES.map((n) => ({ v: slugify(n), t: n })) },
+  {
+    id: 'type', label: 'Tipo', multi: false,
+    options: [
+      { v: 'tv-anime', t: 'TV Anime' }, { v: 'pelicula', t: 'Película' }, { v: 'ova', t: 'OVA' },
+      { v: 'ona', t: 'ONA' }, { v: 'especial', t: 'Especial' }
+    ]
   },
-  async details(url){
-    const d=await aniQ('query($id:Int){Media(id:$id){id title{romaji english} coverImage{extraLarge} bannerImage description genres seasonYear status episodes nextAiringEpisode{episode} trailer{id site} streamingEpisodes{title thumbnail url site}}}',{id:+url});
-    const m=d.Media,se=m.streamingEpisodes||[];let eps;
-    if(se.length)eps=se.map((e,i)=>({number:i+1,title:e.title,url:e.url}));
-    else{const n=m.episodes||(m.nextAiringEpisode?m.nextAiringEpisode.episode-1:0);eps=Array.from({length:n},(_,i)=>({number:i+1,title:'Episodio '+(i+1),url:'ani:'+m.id+':'+(i+1)}))}
-    return{title:m.title.english||m.title.romaji,cover:m.coverImage.extraLarge,banner:m.bannerImage,description:m.description,genres:m.genres,year:m.seasonYear,status:m.status,episodes:eps,trailer:m.trailer&&m.trailer.site==='youtube'?m.trailer.id:null};
+  {
+    id: 'status', label: 'Estado', multi: false,
+    options: [
+      { v: 'emision', t: 'En emisión' }, { v: 'finalizado', t: 'Finalizado' }, { v: 'proximamente', t: 'Próximamente' }
+    ]
+  }
+];
+
+const isNotFound = (e) => !!e && (e.status === 404 || /\b404\b/.test(String(e.message || '')));
+
+/* ---------- SERVIDORES ---------- */
+const FAST_SERVERS = [
+  { priority: 1, name: 'Streamwish', match: /(streamwish|wish|hglink|swiftplayers|alions|filelions|vidhide)/i, type: 'embed' },
+  { priority: 2, name: 'Mp4upload', match: /mp4upload/i, type: 'embed' },
+  { priority: 3, name: 'Okru', match: /(ok\.ru|od\.sdk|okcdn)/i, type: 'embed' },
+  { priority: 4, name: 'YourUpload', match: /yourupload/i, type: 'embed' },
+  { priority: 5, name: 'Filemoon', match: /(filemoon|moonplayer|kerapoxy)/i, type: 'embed' },
+  { priority: 6, name: 'Streamtape', match: /(streamtape|strtape|strcloud)/i, type: 'embed' },
+  { priority: 7, name: 'Doodstream', match: /(dood|ds2play|d0000d|do7go)/i, type: 'embed' },
+  { priority: 8, name: 'Mega', match: /mega\.nz/i, type: 'embed' }
+];
+
+const BLOCKED_SERVERS = [
+  /(fembed|feurl|fe\.|ncdn|streamango|openload|rapidvideo|verystream|clipwatching|jetload|mixdrop|upstream|voe|uqload|sbplay|sbembed|streamsb|embedrise|animeav1\.com\/(assets|static|img|js|css))/i
+];
+
+function classifyFastServer(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+
+  for (const blocked of BLOCKED_SERVERS) {
+    if (blocked.test(url)) return null;
+  }
+
+  for (const srv of FAST_SERVERS) {
+    if (srv.match.test(url)) {
+      return {
+        priority: srv.priority,
+        label: srv.name,
+        url,
+        type: srv.type
+      };
+    }
+  }
+
+  if (/\.m3u8(\?|$)/i.test(url)) {
+    return { priority: 0, label: 'HLS Rápido', url, type: 'hls' };
+  }
+
+  if (/\.mp4(\?|$)/i.test(url) && !/(thumb|poster|preview|cover|ads|promo|sample)/i.test(url)) {
+    return { priority: 1, label: 'MP4 Rápido', url, type: 'mp4' };
+  }
+
+  return null;
+}
+
+function pickText(doc, selectors) {
+  for (const sel of selectors) {
+    const el = doc.querySelector(sel);
+    if (el && el.textContent && el.textContent.trim()) {
+      return el.textContent.trim();
+    }
+  }
+  return '';
+}
+
+function pickAttr(doc, selectors, attr) {
+  for (const sel of selectors) {
+    const el = doc.querySelector(sel);
+    const val = el ? el.getAttribute(attr) : '';
+    if (val && val.trim()) {
+      return val.trim();
+    }
+  }
+  return '';
+}
+
+function parseCardList(doc, baseUrl) {
+  const cardSelectors = [
+    'article',
+    '.anime-card',
+    '.grid a[href*="/anime/"]',
+    'a[href*="/anime/"]'
+  ];
+
+  let cards = [];
+  for (const sel of cardSelectors) {
+    const found = Array.from(doc.querySelectorAll(sel));
+    if (found.length > 0) {
+      cards = found;
+      break;
+    }
+  }
+
+  const seen = new Set();
+  const items = [];
+
+  for (const card of cards) {
+    const link = card.matches('a') ? card : card.querySelector('a[href*="/anime/"]') || card.querySelector('a');
+    const href = link ? link.getAttribute('href') || '' : '';
+    if (!href || href === '#' || href.startsWith('javascript:')) continue;
+
+    const absUrl = api.abs(href, baseUrl);
+    if (seen.has(absUrl)) continue;
+    seen.add(absUrl);
+
+    const img = card.querySelector('img');
+    const coverRaw =
+      img?.getAttribute('data-src') ||
+      img?.getAttribute('src') ||
+      '';
+    const cover = coverRaw ? api.abs(coverRaw, baseUrl) : '';
+
+    const title = (
+      card.querySelector('h2, h3, h4, .title, .anime-title')?.textContent ||
+      img?.getAttribute('alt') ||
+      link?.getAttribute('title') ||
+      link?.textContent ||
+      ''
+    ).trim();
+
+    if (!title) continue;
+
+    const sub = (
+      card.querySelector('.type, .badge, .meta, .sub, span')?.textContent || ''
+    ).trim();
+
+    items.push({
+      title,
+      cover,
+      url: absUrl,
+      sub: sub && sub !== title ? sub : undefined
+    });
+  }
+
+  return items;
+}
+
+function extractEpisodes(doc, htmlText, animeUrl) {
+  const episodes = [];
+  const seenUrls = new Set();
+  const seenNumbers = new Set();
+
+  const animeSlug = animeUrl
+    .replace(/^https?:\/\/[^/]+/i, '')
+    .replace(/\/+$/, '')
+    .split('/')
+    .pop() || '';
+
+  const addEpisode = (number, title, epUrl) => {
+    const num = Number(number);
+    if (!Number.isFinite(num) || num <= 0) return;
+    const cleanUrl = epUrl ? api.abs(epUrl, animeUrl) : `${animeUrl.replace(/\/+$/, '')}/episodio-${num}`;
+    if (seenUrls.has(cleanUrl) && seenNumbers.has(num)) return;
+    seenUrls.add(cleanUrl);
+    seenNumbers.add(num);
+    episodes.push({
+      number: num,
+      title: (title || `Episodio ${num}`).trim(),
+      url: cleanUrl
+    });
+  };
+
+  const allLinks = Array.from(doc.querySelectorAll('a[href]'));
+  for (const a of allLinks) {
+    const href = (a.getAttribute('href') || '').trim();
+    if (!href || href === '#' || href.startsWith('javascript:')) continue;
+
+    const text = (a.textContent || '').replace(/\s+/g, ' ').trim();
+    const looksLikeEp =
+      /\/(episodio|ep|ver|watch|capitulo|cap)[\/-]/i.test(href) ||
+      /-(episodio|ep|capitulo|cap)-\d+/i.test(href) ||
+      (animeSlug && href.includes(animeSlug) && /\/\d+\/?$/.test(href)) ||
+      /^(episodio|ep\.?|cap\.?|capítulo)\s*\d+/i.test(text);
+
+    if (!looksLikeEp) continue;
+
+    const numMatch =
+      href.match(/(?:episodio|ep|capitulo|cap)[-_\/](\d+(?:\.\d+)?)/i) ||
+      href.match(/\/(\d+(?:\.\d+)?)\/?$/) ||
+      text.match(/(?:episodio|ep\.?|cap\.?|capítulo)\s*(\d+(?:\.\d+)?)/i) ||
+      text.match(/\b(\d+(?:\.\d+)?)\b/);
+
+    if (numMatch) {
+      addEpisode(
+        numMatch[1],
+        text || `Episodio ${numMatch[1]}`,
+        href
+      );
+    }
+  }
+
+  const dataEls = Array.from(
+    doc.querySelectorAll('[data-episode], [data-ep], [data-href], [data-url]')
+  );
+  for (const el of dataEls) {
+    const epAttr = el.getAttribute('data-episode') || el.getAttribute('data-ep') || '';
+    const hrefAttr = el.getAttribute('data-href') || el.getAttribute('data-url') || '';
+    const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+
+    const numMatch =
+      epAttr.match(/(\d+(?:\.\d+)?)/) ||
+      hrefAttr.match(/(?:episodio|ep|cap)[-_\/](\d+(?:\.\d+)?)/i) ||
+      txt.match(/(?:episodio|ep\.?|cap\.?)\s*(\d+(?:\.\d+)?)/i);
+
+    if (numMatch) {
+      addEpisode(
+        numMatch[1],
+        txt || `Episodio ${numMatch[1]}`,
+        hrefAttr || undefined
+      );
+    }
+  }
+
+  if (episodes.length === 0 && htmlText) {
+    const cleanHtml = htmlText.replace(/\\\//g, '/');
+    const urlMatches = cleanHtml.match(/https?:\/\/[^\s"'<>]+\/(?:episodio|ep|ver|watch)[\/-][^\s"'<>]+/gi) || [];
+    for (const u of urlMatches) {
+      const m = u.match(/(?:episodio|ep|ver|watch)[-_\/](\d+(?:\.\d+)?)/i);
+      if (m) {
+        addEpisode(m[1], `Episodio ${m[1]}`, u);
+      }
+    }
+  }
+
+  if (episodes.length === 0) {
+    const bodyText = doc.body ? doc.body.textContent || '' : '';
+    const countMatch = bodyText.match(/(?:episodios?|capítulos?|capitulos?)\s*[:\-]?\s*(\d{1,4})\b/i);
+    if (countMatch) {
+      const total = Number(countMatch[1]);
+      if (total > 0 && total <= 200) {
+        for (let i = 1; i <= total; i++) {
+          addEpisode(i, `Episodio ${i}`, `${animeUrl.replace(/\/+$/, '')}/episodio-${i}`);
+        }
+      }
+    }
+  }
+
+  episodes.sort((a, b) => a.number - b.number);
+  return episodes;
+}
+
+return {
+  id: 'animeav1',
+  name: 'AnimeAV1',
+  version: 7,
+
+  filters: FILTERS,
+
+  async home(page = 1) {
+    try {
+      const url = api.abs(`/catalogo?page=${page}`, BASE_URL);
+      const doc = await api.html(url);
+      return parseCardList(doc, BASE_URL);
+    } catch (e) {
+      if (page > 1 && isNotFound(e)) return []; // ya no hay más páginas
+      throw e;
+    }
   },
-  async videos(url,ctx){
-    const out=[];
-    if(/^https?:/.test(url))out.push({label:'Ver en la plataforma oficial',url,type:'external'});
-    if(ctx&&ctx.detail&&ctx.detail.trailer)out.push({label:'Tráiler',url:'https://www.youtube.com/embed/'+ctx.detail.trailer,type:'embed'});
-    return out;
+
+  async search(query, page = 1, filters = {}) {
+    const q = (query || '').trim();
+
+    // Filtros elegidos -> parámetros de la URL (género, tipo, estado)
+    const params = [];
+    for (const id of Object.keys(FILTER_PARAM)) {
+      const sel = filters && filters[id];
+      const val = Array.isArray(sel) ? sel[0] : sel;
+      if (val) params.push(`${FILTER_PARAM[id]}=${encodeURIComponent(val)}`);
+    }
+
+    const load = async (searchKey) => {
+      const qs = params.slice();
+      if (q) qs.push(`${searchKey}=${encodeURIComponent(q)}`);
+      qs.push(`page=${page}`);
+      const doc = await api.html(api.abs(`/catalogo?${qs.join('&')}`, BASE_URL));
+      return parseCardList(doc, BASE_URL);
+    };
+
+    try {
+      const items = await load('search');
+      if (items.length > 0 || !q || page > 1) return items;
+      return await load('q');
+    } catch (e) {
+      if (page > 1 && isNotFound(e)) return []; // ya no hay más páginas
+      throw e;
+    }
+  },
+
+  async details(url) {
+    const absUrl = api.abs(url, BASE_URL);
+    const htmlText = await api.text(absUrl);
+    const doc = await api.html(absUrl);
+
+    const title = pickText(doc, ['h1', '.anime-title', 'header h1', 'main h1']);
+
+    // Portada: og:image o la primera imagen que no sea el logo del sitio
+    const goodImg = (u) => !!u && !/^data:/i.test(u) && !/logo|favicon|placeholder/i.test(u);
+    const imgCandidates = [pickAttr(doc, ['meta[property="og:image"]'], 'content')].concat(
+      Array.from(doc.querySelectorAll('.poster img, .cover img, article img, main img, img')).map(
+        (el) => el.getAttribute('data-src') || el.getAttribute('src') || ''
+      )
+    );
+    const coverRaw = imgCandidates.find(goodImg) || '';
+    const cover = coverRaw ? api.abs(coverRaw, absUrl) : '';
+
+    const bannerRaw = pickAttr(
+      doc,
+      ['.banner img', '.backdrop img', '.cover-bg img'],
+      'src'
+    );
+    const banner = bannerRaw ? api.abs(bannerRaw, absUrl) : undefined;
+
+    const description = pickText(doc, [
+      '.synopsis',
+      '.description',
+      '[class*="synopsis"]',
+      '[class*="description"]',
+      'p'
+    ]);
+
+    const genres = Array.from(
+      doc.querySelectorAll('a[href*="/catalogo?genre="], a[href*="genre="], .genres a, .genre')
+    )
+      .map((el) => (el.textContent || '').trim())
+      .filter(Boolean);
+
+    const metaText = doc.body ? doc.body.textContent || '' : '';
+    const yearMatch = metaText.match(/\b(19\d\d|20\d\d)\b/);
+    const year = yearMatch ? Number(yearMatch[1]) : undefined;
+
+    let status;
+    if (/en emisión/i.test(metaText)) {
+      status = 'En emisión';
+    } else if (/finalizado|completado/i.test(metaText)) {
+      status = 'Finalizado';
+    }
+
+    const episodes = extractEpisodes(doc, htmlText, absUrl);
+
+    return {
+      title,
+      cover,
+      banner,
+      description,
+      genres: [...new Set(genres)],
+      year,
+      status,
+      episodes
+    };
+  },
+
+  async videos(episodeUrl, ctx) {
+    const absUrl = api.abs(episodeUrl, BASE_URL);
+    const html = await api.text(absUrl);
+    const doc = await api.html(absUrl);
+
+    const found = [];
+    const seen = new Set();
+
+    const addSource = (rawUrl) => {
+      if (!rawUrl) return;
+      const cleaned = String(rawUrl)
+        .replace(/\\\//g, '/')
+        .replace(/\\u0026/g, '&')
+        .replace(/&amp;/g, '&')
+        .trim();
+
+      if (!cleaned || cleaned.startsWith('data:') || cleaned.startsWith('javascript:')) return;
+      const full = api.abs(cleaned, absUrl);
+      if (!full || seen.has(full)) return;
+      seen.add(full);
+
+      const classified = classifyFastServer(full);
+      if (classified) {
+        found.push(classified);
+      }
+    };
+
+    doc.querySelectorAll('iframe').forEach((iframe) => {
+      addSource(
+        iframe.getAttribute('src') ||
+        iframe.getAttribute('data-src') ||
+        iframe.getAttribute('data-lazy-src') ||
+        ''
+      );
+    });
+
+    doc.querySelectorAll('[data-embed], [data-player], [data-src], [data-url], [data-link]').forEach((el) => {
+      addSource(
+        el.getAttribute('data-embed') ||
+        el.getAttribute('data-player') ||
+        el.getAttribute('data-src') ||
+        el.getAttribute('data-url') ||
+        el.getAttribute('data-link') ||
+        ''
+      );
+    });
+
+    const unescaped = html.replace(/\\\//g, '/').replace(/\\u0026/g, '&');
+    const allUrls = unescaped.match(/https?:\/\/[^\s"'<>\\]+/gi) || [];
+    for (const u of allUrls) {
+      addSource(u);
+    }
+
+    found.sort((a, b) => a.priority - b.priority);
+
+    return found.map(({ label, url, type }) => ({
+      label,
+      url,
+      type
+    }));
   }
 };
+
+})();
+BUILTIN.builtin=true;
 
 /* ============ plantilla que se copia para pedirle módulos a otra IA ============ */
 const TEMPLATE=`// MÓDULO PARA AnimeHub
@@ -386,7 +796,7 @@ function loadMods(){
   rebuildSel();
 }
 const modById=id=>mods.find(m=>m.id===id);
-const cur=()=>modById(LS.get('active','anilist'))||BUILTIN;
+const cur=()=>modById(LS.get('active','animeav1'))||BUILTIN;
 function rebuildSel(){
   const a=cur().id;
   $('#modSel').innerHTML=mods.map(m=>'<option value="'+esc(m.id)+'"'+(m.id===a?' selected':'')+'>'+esc(m.name)+'</option>').join('');
@@ -401,6 +811,7 @@ function installCode(code){
 
 /* ============ favoritos, recientes, progreso ============ */
 let favs=LS.get('favs',[]),hist=LS.get('hist',[]),PROG=LS.get('prog',{});
+favs=favs.filter(f=>f.mod!=='anilist');hist=hist.filter(h=>h.mod!=='anilist');LS.set('favs',favs);LS.set('hist',hist);
 const isFav=(m,u)=>favs.some(f=>f.mod===m&&f.url===u);
 function toggleFav(item){
   if(isFav(item.mod,item.url))favs=favs.filter(f=>!(f.mod===item.mod&&f.url===item.url));else favs.unshift(item);
@@ -591,7 +1002,7 @@ $('#main').addEventListener('click',async e=>{
   const t=e.target;
   if(t.dataset.act==='fprompt'){copyPrompt(t.dataset.id)}
   else if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();rMods()}
-  else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','anilist');homeSt={mod:null};loadMods();rMods()}
+  else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','animeav1');homeSt={mod:null};loadMods();rMods()}
   else if(t.id==='mInstUrl'){
     const u=$('#mUrl').value.trim();if(!u)return toast('Escribe el enlace');
     try{t.textContent='Descargando…';installCode(await api.text(u));rMods()}catch(err){t.textContent='Instalar desde enlace';toast('Error: '+err.message)}
