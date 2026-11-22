@@ -265,6 +265,7 @@ return {
 
   // FILTROS de la barra superior (Género / Tipo / Estado). Pon aquí los géneros, tipos y estados REALES de la web.
   //   id: 'genre' | 'type' | 'status'   v = valor que usa la web (slug o id)   t = nombre que se ve
+  //   multi: false  -> si la web solo deja elegir un género a la vez
   // Si prefieres leerlos de la propia web, en lugar de 'filters' define: async getFilters() { return [ ...mismo formato... ]; }
   filters: [
     { id: 'genre', label: 'Género', options: [{ v: 'accion', t: 'Acción' }, { v: 'comedia', t: 'Comedia' }] },
@@ -295,11 +296,6 @@ return {
 };`;
 
 /* ============ filtros (Género / Tipo / Estado) para cualquier módulo ============ */
-const DEFAULT_FILTERS=[
-  {id:'genre',label:'Género',options:[['accion','Acción'],['aventura','Aventura'],['animacion','Animación'],['ciencia-ficcion','Ciencia ficción'],['comedia','Comedia'],['crimen','Crimen'],['drama','Drama'],['familia','Familia'],['fantasia','Fantasía'],['guerra','Guerra'],['misterio','Misterio'],['musica','Música'],['romance','Romance'],['suspenso','Suspenso'],['terror','Terror']]},
-  {id:'type',label:'Tipo',options:[['pelicula','Película'],['serie','Serie'],['anime','Anime']]},
-  {id:'status',label:'Estado',options:[['emision','En emisión'],['finalizado','Finalizado']]}
-];
 const FLABEL={genre:'Género',genres:'Género',type:'Tipo',status:'Estado'};
 const FCACHE={},FDONE={};
 function normOpt(o){
@@ -325,7 +321,6 @@ function filtersOf(m){
   if(FCACHE[m.id])return FCACHE[m.id];
   let f=[];
   try{f=normFilters(m.filters)}catch(e){console.error(e)}
-  if(!f.length)f=normFilters(DEFAULT_FILTERS);
   FCACHE[m.id]=f;return f;
 }
 async function loadFilters(m){
@@ -341,6 +336,32 @@ const isEnd=(e,p)=>p>1&&(e.status===404||/\b404\b/.test(String(e.message||'')));
 function dedupe(have,add,mod){
   const seen=new Set(have.map(x=>x.url));
   return(add||[]).filter(x=>x&&x.url!=null&&!seen.has(x.url)&&seen.add(x.url)).map(x=>Object.assign({},x,{mod}));
+}
+
+const hasFilters=m=>typeof m.getFilters==='function'||filtersOf(m).length>0;
+const noFiltChip=()=>'<button type="button" class="fchip" data-nf="1">Géneros no disponibles ⓘ</button>';
+function bindNoFilt(){document.querySelectorAll('.fchip[data-nf]').forEach(b=>{b.onclick=()=>askAddFilters(cur())})}
+function askAddFilters(m){
+  openSheet({title:'«'+m.name+'» aún no trae géneros',items:[
+    {k:'copy',label:'Copiar petición para que mi IA añada los géneros reales de esta web',on:false},
+    {k:'x',label:'Cerrar',on:false}],multi:false,onPick:k=>{if(k==='copy')copyPrompt(m.id)}});
+}
+function filtersPrompt(m){
+  const it=installed.find(x=>x.id===m.id);
+  return 'Eres experto en JavaScript. Modifica este módulo de mi app AnimeHub para que tenga FILTROS REALES de la web que usa (la misma web que ya consulta el código):\n\n'
+  +'1) Mira en esa web su lista de géneros/categorías (y los tipos y estados si los tiene: serie, película, OVA, en emisión, finalizado…). Copia EXACTAMENTE los nombres que muestra la web y el valor que usa en su URL o API (slug o id).\n'
+  +'2) Añade al objeto del módulo: filters:[{id:\'genre\',label:\'Género\',options:[{v:\'valor-de-la-web\',t:\'Nombre visible\'}, ...]}, {id:\'type\',label:\'Tipo\',options:[...]}, {id:\'status\',label:\'Estado\',options:[...]}] (omite los que la web no tenga). Si la web solo deja elegir un género a la vez, añade multi:false a ese filtro. Si son muchos o cambian, en lugar de filters puedes definir async getFilters() que los lea del HTML o API de la web y devuelva ese mismo formato.\n'
+  +'3) Haz que search(query, page, filters) APLIQUE esos filtros: filters trae lo elegido, por ejemplo {genre:[\'accion\'],type:[\'serie\'],status:[\'emision\']}. Construye la URL o petición de listado de la web con ellos (query puede venir vacío: en ese caso lista solo por filtros) y respeta siempre el número de page.\n'
+  +'4) Cuando ya no haya más páginas, devuelve [] (no lances error).\n'
+  +'5) Conserva id, name, home, details y videos funcionando y sube version en 1.\n'
+  +'6) Devuélveme el módulo COMPLETO, solo el código, listo para pegar en la app (termina con return {...}; dentro tienes api.json, api.text, api.html y api.abs; las listas usan {title, cover, url, sub}).\n\n'
+  +'CÓDIGO ACTUAL DEL MÓDULO:\n'+(it?it.code:'(no disponible)');
+}
+async function copyPrompt(id){
+  const m=modById(id);if(!m)return;
+  const txt=filtersPrompt(m);
+  try{await navigator.clipboard.writeText(txt);toast('Petición copiada: pégala en tu IA')}
+  catch(e){setTab('mods');const c=$('#mCode');if(c){c.value=txt;toast('Copia el texto del cuadro y pégalo en tu IA')}}
 }
 
 /* ============ gestión de módulos ============ */
@@ -424,12 +445,13 @@ const SEARCH_SVG='<svg viewBox="0 0 24 24" width="26" height="26"><path fill="cu
 function homeBar(){
   const fl=filtersOf(cur());
   return '<div class="frow"><button type="button" class="sico" id="hSearch" aria-label="Buscar">'+SEARCH_SVG+'</button>'
-    +fl.map(f=>'<button type="button" class="fchip'+(hN(f.id)?' on':'')+'" data-h="'+esc(f.id)+'">'+esc(f.label)+' ('+hN(f.id)+') ▾</button>').join('')+'</div>';
+    +(fl.length?fl.map(f=>'<button type="button" class="fchip'+(hN(f.id)?' on':'')+'" data-h="'+esc(f.id)+'">'+esc(f.label)+' ('+hN(f.id)+') ▾</button>').join(''):noFiltChip())+'</div>';
 }
 function bindHomeBar(){
   const s=$('#hSearch');
   if(s)s.onclick=()=>{setTab('search');setTimeout(()=>{const q=$('#sq');if(q)q.focus()},60)};
   document.querySelectorAll('.fchip[data-h]').forEach(b=>{b.onclick=()=>openFilter(b.dataset.h,HF,()=>{homeSt={mod:null};rHome()})});
+  bindNoFilt();
 }
 let homeSt={mod:null};
 async function rHome(){
@@ -474,10 +496,12 @@ let S={q:'',items:[],page:0,done:false,err:''},SF={};
 const nSel=id=>(SF[id]||[]).length;
 const anyFilter=()=>Object.keys(SF).some(k=>(SF[k]||[]).length);
 function sBar(){
-  return '<div class="frow">'+filtersOf(cur()).map(f=>'<button type="button" class="fchip'+(nSel(f.id)?' on':'')+'" data-f="'+esc(f.id)+'">'+esc(f.label)+' ('+nSel(f.id)+') ▾</button>').join('')+'</div>';
+  const fl=filtersOf(cur());
+  return '<div class="frow">'+(fl.length?fl.map(f=>'<button type="button" class="fchip'+(nSel(f.id)?' on':'')+'" data-f="'+esc(f.id)+'">'+esc(f.label)+' ('+nSel(f.id)+') ▾</button>').join(''):noFiltChip())+'</div>';
 }
 function bindSearchBar(){
   document.querySelectorAll('.fchip[data-f]').forEach(b=>{b.onclick=()=>openFilter(b.dataset.f,SF,()=>{S.q=$('#sq')?$('#sq').value.trim():S.q;rSearch();doSearch(1)})});
+  bindNoFilt();
 }
 function rSearch(){
   const m=cur();loadFilters(m);
@@ -546,8 +570,9 @@ function rFavs(){
 function rMods(){
   const a=cur().id;
   $('#main').innerHTML=
-   '<h3>Módulos instalados</h3>'+mods.map(m=>'<div class="mrow"><div><b>'+esc(m.name)+'</b><small>'+esc(m.id)+' · v'+esc(m.version||1)+(m.builtin?' · incluido':'')+'</small></div>'
+   '<h3>Módulos instalados</h3>'+mods.map(m=>'<div class="mrow"><div><b>'+esc(m.name)+'</b><small>'+esc(m.id)+' · v'+esc(m.version||1)+(m.builtin?' · incluido':'')+(hasFilters(m)?'':' · sin géneros')+'</small></div>'
      +(a===m.id?'<span class="tag">activo</span>':'<button class="sm" data-act="use" data-id="'+esc(m.id)+'">Usar</button>')
+     +(!m.builtin&&!hasFilters(m)?'<button class="sm" data-act="fprompt" data-id="'+esc(m.id)+'">+ Géneros</button>':'')
      +(m.builtin?'':'<button class="sm del" data-act="del" data-id="'+esc(m.id)+'">Quitar</button>')+'</div>').join('')
    +'<h3>Instalar un módulo</h3>'
    +'<input id="mUrl" placeholder="Enlace al archivo .js del módulo"><button class="btn" id="mInstUrl">Instalar desde enlace</button>'
@@ -559,7 +584,8 @@ function rMods(){
 }
 $('#main').addEventListener('click',async e=>{
   const t=e.target;
-  if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();rMods()}
+  if(t.dataset.act==='fprompt'){copyPrompt(t.dataset.id)}
+  else if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();rMods()}
   else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','anilist');homeSt={mod:null};loadMods();rMods()}
   else if(t.id==='mInstUrl'){
     const u=$('#mUrl').value.trim();if(!u)return toast('Escribe el enlace');
