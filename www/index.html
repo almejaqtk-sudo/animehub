@@ -24,10 +24,10 @@ h1,h3{margin:0}
 #tabs button.on{color:var(--ac)}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 10px}
 @media(min-width:600px){.grid{grid-template-columns:repeat(5,1fr)}}
-.card{background:none;border:0;padding:0;text-align:left;color:inherit;min-width:0}
+.card{background:none;border:0;padding:0;text-align:left;color:inherit;min-width:0;display:flex;flex-direction:column;justify-content:flex-start;align-self:start}
 .poster{aspect-ratio:2/3;border-radius:10px;overflow:hidden;background:var(--card)}
 .poster img{width:100%;height:100%;object-fit:cover;display:block}
-.ct{font-size:12.5px;margin-top:6px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ct{font-size:12.5px;margin-top:6px;line-height:1.25;min-height:2.5em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .cs{font-size:11px;color:var(--mut);margin-top:2px}
 .sk{aspect-ratio:2/3;border-radius:10px;background:var(--card);animation:pulse 1.2s infinite alternate}
 @keyframes pulse{to{opacity:.45}}
@@ -111,6 +111,10 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 #stage.novid.clean #pReveal{display:block}
 #stage.novid.clean #ctl{opacity:0}
 #stage.novid.clean #pBack,#stage.novid.clean .tools{pointer-events:none}
+#stage{outline:none}
+.pill{text-transform:uppercase}
+#pRw svg,#pFw svg{width:60px;height:60px}
+.sico{flex:none;background:none;border:0;padding:6px 10px 6px 4px;color:var(--tx);display:grid;place-items:center}
 .frow{display:flex;gap:8px;overflow-x:auto;margin:-6px 0 14px;padding-bottom:4px}
 .fchip{flex:none;background:none;border:1.5px solid #ffffff2e;border-radius:12px;padding:10px 14px;font-size:14px;font-weight:600}
 .fchip.on{border-color:var(--ac);color:var(--ac)}
@@ -145,7 +149,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 <section id="detail" class="ov" hidden></section>
 
 <section id="player" class="ov" hidden>
-  <div id="stage">
+  <div id="stage" tabindex="-1">
     <div id="vbox"></div>
     <div id="ctl">
       <div class="ctop">
@@ -155,7 +159,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
       </div>
       <div class="side L"><div class="vbar"><i id="bBri"></i></div><span>☀</span></div>
       <div class="side R"><div class="vbar"><i id="bVol"></i></div><span>🔊</span></div>
-      <div class="cmid"><button id="pRw" aria-label="Atrasar 10 segundos">↺ 10</button><button id="pPlay" aria-label="Reproducir o pausar"></button><button id="pFw" aria-label="Adelantar 10 segundos">10 ↻</button></div>
+      <div class="cmid"><button id="pRw" aria-label="Atrasar 10 segundos"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="12" y="16.2" font-size="6.5" font-weight="700" text-anchor="middle" fill="currentColor">10</text></svg></button><button id="pPlay" aria-label="Reproducir o pausar"></button><button id="pFw" aria-label="Adelantar 10 segundos"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M18 13c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6v4l5-5-5-5v4c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8h-2z"/><text x="12" y="16.2" font-size="6.5" font-weight="700" text-anchor="middle" fill="currentColor">10</text></svg></button></div>
       <div class="cbot">
         <div class="seek"><span id="pCur">0:00</span><input type="range" id="pSeek" min="0" max="1000" value="0"><span id="pDur">0:00</span></div>
         <div class="tools"><button id="pFit">Escala: Ajustar</button><button id="pLock">Bloquear</button><button id="pEps">Episodios</button><button id="pQ">Servidor</button><button id="pSpd">1x</button></div>
@@ -346,21 +350,35 @@ function setTab(t){
 function render(){({home:rHome,search:rSearch,favs:rFavs,mods:rMods})[tab]()}
 const skeleton=()=>'<div class="grid">'+'<div class="sk"></div>'.repeat(9)+'</div>';
 function grid(items){
-  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><img loading="lazy" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(i.title)+'</div>'+(i.sub?'<div class="cs">'+esc(i.sub)+'</div>':'')+'</button>').join('')+'</div>';
+  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><img loading="lazy" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(i.title)+'</div>'+'</button>').join('')+'</div>';
 }
 $('#main').addEventListener('click',e=>{
   const c=e.target.closest('.card');
   if(c)openDetail(c.dataset.m,c.dataset.u,{title:c.dataset.t,cover:c.dataset.c});
 });
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)setTab(b.dataset.t)});
-$('#modSel').addEventListener('change',e=>{LS.set('active',e.target.value);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};render()});
+$('#modSel').addEventListener('change',e=>{LS.set('active',e.target.value);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};render()});
 
 /* ---- Inicio ---- */
+let HF={};
+const hAny=()=>Object.keys(HF).some(k=>(HF[k]||[]).length);
+const hN=id=>(HF[id]||[]).length;
+const SEARCH_SVG='<svg viewBox="0 0 24 24" width="26" height="26"><path fill="currentColor" d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 14 15.5l.3.3v.8l5 5 1.5-1.5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>';
+function homeBar(){
+  const fl=cur().filters||[];
+  return '<div class="frow"><button type="button" class="sico" id="hSearch" aria-label="Buscar">'+SEARCH_SVG+'</button>'
+    +fl.map(f=>'<button type="button" class="fchip'+(hN(f.id)?' on':'')+'" data-h="'+esc(f.id)+'">'+esc(f.label)+' ('+hN(f.id)+') ▾</button>').join('')+'</div>';
+}
+function bindHomeBar(){
+  const s=$('#hSearch');
+  if(s)s.onclick=()=>{setTab('search');setTimeout(()=>{const q=$('#sq');if(q)q.focus()},60)};
+  document.querySelectorAll('.fchip[data-h]').forEach(b=>{b.onclick=()=>openFilter(b.dataset.h,HF,()=>{homeSt={mod:null};rHome()})});
+}
 let homeSt={mod:null};
 async function rHome(){
   const m=cur();
   if(homeSt.mod!==m.id)homeSt={mod:m.id,items:[],page:0,done:false,loading:false,err:''};
-  if(!homeSt.items.length&&!homeSt.done){$('#main').innerHTML=skeleton();await loadHome();return}
+  if(!homeSt.items.length&&!homeSt.done){$('#main').innerHTML=homeBar()+skeleton();bindHomeBar();await loadHome();return}
   drawHome();
 }
 async function loadHome(){
@@ -368,7 +386,7 @@ async function loadHome(){
   if(st.loading)return;st.loading=true;
   try{
     const p=st.page+1;
-    const r=(typeof m.home==='function'?await m.home(p):await m.search('',p))||[];
+    const r=((typeof m.home==='function'&&!hAny())?await m.home(p):await m.search('',p,HF))||[];
     if(st!==homeSt)return;
     st.page=p;if(!r.length)st.done=true;
     st.items.push(...r.map(x=>Object.assign({},x,{mod:m.id})));
@@ -378,11 +396,11 @@ async function loadHome(){
 }
 function drawHome(){
   const st=homeSt,mn=$('#main'),y=mn.scrollTop;
-  mn.innerHTML=(st.items.length?grid(st.items):'')
+  mn.innerHTML=homeBar()+(st.items.length?grid(st.items):'')
     +(st.err?'<p class="empty">No se pudo cargar: '+esc(st.err)+'</p>':'')
-    +(!st.items.length&&!st.err?'<p class="empty">Este módulo no tiene pantalla de inicio. Usa la pestaña Buscar.</p>':'')
+    +(!st.items.length&&!st.err?'<p class="empty">'+(hAny()?'Sin resultados con esos filtros.':'Este módulo no tiene pantalla de inicio. Usa la pestaña Buscar.')+'</p>':'')
     +(!st.done&&st.items.length?'<button class="btn more" id="more">Cargar más</button>':'');
-  mn.scrollTop=y;
+  mn.scrollTop=y;bindHomeBar();
   const mb=$('#more');if(mb)mb.onclick=()=>{mb.textContent='Cargando…';loadHome()};
 }
 
@@ -397,14 +415,14 @@ function rSearch(){
     +'<div id="sres"></div>';
   $('#sq').value=S.q;
   $('#sf').onsubmit=e=>{e.preventDefault();$('#sq').blur();doSearch(1)};
-  document.querySelectorAll('.fchip').forEach(b=>{b.onclick=()=>openFilter(b.dataset.f)});
+  document.querySelectorAll('.fchip[data-f]').forEach(b=>{b.onclick=()=>openFilter(b.dataset.f,SF,()=>{S.q=$('#sq')?$('#sq').value.trim():S.q;rSearch();doSearch(1)})});
   drawSearch();
 }
-function openFilter(id){
+function openFilter(id,store,after){
   const m=cur(),f=(m.filters||[]).find(x=>x.id===id);if(!f)return;
-  const sel=SF[id]||[];
+  const sel=store[id]||[];
   const items=f.options.map(o=>({k:o.v,label:o.t,on:sel.indexOf(o.v)>=0}));
-  const done=keys=>{S.q=$('#sq')?$('#sq').value.trim():S.q;SF[id]=keys;rSearch();doSearch(1)};
+  const done=keys=>{store[id]=keys;after()};
   openSheet({title:f.label,items,multi:f.multi!==false,onApply:done,onPick:k=>done(k==null?[]:[k])});
 }
 async function doSearch(p){
@@ -456,7 +474,7 @@ function rMods(){
 }
 $('#main').addEventListener('click',async e=>{
   const t=e.target;
-  if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};rebuildSel();rMods()}
+  if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();rMods()}
   else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','anilist');homeSt={mod:null};loadMods();rMods()}
   else if(t.id==='mInstUrl'){
     const u=$('#mUrl').value.trim();if(!u)return toast('Escribe el enlace');
@@ -616,10 +634,10 @@ function applyFit(){
 }
 window.addEventListener('resize',()=>{if(P)applyFit()});
 function applyBright(){if(vid)vid.style.filter=bright===1?'':'brightness('+bright+')';updBars()}
-function armClean(){
-  clearTimeout(cleanT);
-  cleanT=setTimeout(()=>{if($('#vbox iframe')&&$('#sheet').hidden)$('#stage').classList.add('clean')},3000);
+function hideOverlay(){
+  if($('#vbox iframe')&&$('#sheet').hidden){$('#stage').classList.add('clean');$('#stage').focus()}
 }
+function armClean(ms){clearTimeout(cleanT);cleanT=setTimeout(hideOverlay,ms||3000)}
 function hud(t){const e=$('#hud');e.textContent=t;e.classList.add('on');clearTimeout(hudT)}
 function hideHud(ms){clearTimeout(hudT);hudT=setTimeout(()=>$('#hud').classList.remove('on'),ms||500)}
 async function setFs(on){
@@ -724,7 +742,7 @@ $('#pBack').onclick=()=>history.back();
 $('#pPlay').onclick=()=>{if(vid){if(vid.paused)vid.play();else vid.pause()}};
 $('#pRw').onclick=()=>{if(vid){vid.currentTime=Math.max(0,vid.currentTime-10);armHide()}};
 $('#pFw').onclick=()=>{if(vid){vid.currentTime=Math.min(vid.duration||1e9,vid.currentTime+10);armHide()}};
-$('#pSkip').onclick=()=>{if(vid){vid.currentTime=Math.min(vid.duration||1e9,vid.currentTime+85);hud('+85 s');hideHud(700)}};
+$('#pSkip').onclick=()=>{if(vid){vid.currentTime=Math.min(vid.duration||1e9,vid.currentTime+90);hud('+90 s');hideHud(700)}};
 $('#pSeek').addEventListener('input',e=>{seeking=true;if(vid&&vid.duration)$('#pCur').textContent=fmt(e.target.value/1000*vid.duration)});
 $('#pSeek').addEventListener('change',e=>{if(vid&&vid.duration)vid.currentTime=e.target.value/1000*vid.duration;seeking=false;armHide()});
 const SPEEDS=[1,1.25,1.5,2,0.75];
@@ -741,12 +759,12 @@ $('#pQ').onclick=()=>{
   openSheet({title:'Servidor',items:P.srcs.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),on:k===curK})),multi:false,keep:true,onPick:k=>{if(k!=null){P.pref=P.srcs[k].label||null;pickSrc(k)}}});
 };
 
-/* reproductor incrustado: las opciones se ocultan solas o al tocar el video; la franja de arriba las vuelve a mostrar */
-$('#pReveal').onclick=()=>{$('#stage').classList.remove('clean');window.focus();armClean()};
+/* reproductor incrustado: al tocar el video aparecen las opciones (y se ocultan solas); la franja de arriba también las muestra */
+$('#pReveal').onclick=()=>{$('#stage').classList.remove('clean');$('#stage').focus();armClean(4000)};
 window.addEventListener('blur',()=>{
   setTimeout(()=>{
     const a=document.activeElement;
-    if(P&&a&&a.tagName==='IFRAME'){clearTimeout(cleanT);$('#stage').classList.add('clean')}
+    if(P&&a&&a.tagName==='IFRAME'){$('#stage').classList.remove('clean');armClean(4000)}
   },0);
 });
 
