@@ -25,8 +25,9 @@ h1,h3{margin:0}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 10px}
 @media(min-width:600px){.grid{grid-template-columns:repeat(5,1fr)}}
 .card{background:none;border:0;padding:0;text-align:left;color:inherit;min-width:0;display:flex;flex-direction:column;justify-content:flex-start;align-self:start}
-.poster{aspect-ratio:2/3;border-radius:10px;overflow:hidden;background:var(--card)}
-.poster img{width:100%;height:100%;object-fit:cover;display:block}
+.poster{aspect-ratio:2/3;border-radius:10px;overflow:hidden;background:var(--card);position:relative}
+.poster img{width:100%;height:100%;object-fit:cover;display:block;position:relative}
+.poster .ph{position:absolute;inset:0;display:grid;place-items:center;font-size:40px;font-weight:800;color:var(--card2)}
 .ct{font-size:12.5px;margin-top:6px;line-height:1.25;min-height:2.5em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .cs{font-size:11px;color:var(--mut);margin-top:2px}
 .sk{aspect-ratio:2/3;border-radius:10px;background:var(--card);animation:pulse 1.2s infinite alternate}
@@ -343,6 +344,18 @@ function pickAttr(doc, selectors, attr) {
   return '';
 }
 
+// Portada real: prueba los atributos "lazy" antes que src y descarta marcadores de posición
+function imgUrl(img, baseUrl) {
+  if (!img) return '';
+  const bad = (u) => !u || /^data:/i.test(u) || /(placeholder|blank|loading|lazy\.|noimage|default)/i.test(u);
+  const fromSet = (v) => String(v || '').trim().split(/\s+/)[0];
+  const cand = ['data-src', 'data-lazy-src', 'data-original', 'data-lazy', 'data-thumb', 'data-poster']
+    .map((a) => img.getAttribute(a) || '')
+    .concat([fromSet(img.getAttribute('data-srcset')), img.getAttribute('src') || '', fromSet(img.getAttribute('srcset'))]);
+  const raw = cand.find((u) => !bad(u)) || '';
+  return raw ? api.abs(raw, baseUrl) : '';
+}
+
 function parseCardList(doc, baseUrl) {
   const cardSelectors = [
     'article',
@@ -373,11 +386,7 @@ function parseCardList(doc, baseUrl) {
     seen.add(absUrl);
 
     const img = card.querySelector('img');
-    const coverRaw =
-      img?.getAttribute('data-src') ||
-      img?.getAttribute('src') ||
-      '';
-    const cover = coverRaw ? api.abs(coverRaw, baseUrl) : '';
+    const cover = imgUrl(img, baseUrl);
 
     const title = (
       card.querySelector('h2, h3, h4, .title, .anime-title')?.textContent ||
@@ -582,6 +591,159 @@ function parseSchedule(doc, baseUrl) {
   return result();
 }
 
+/* ---------- HORARIO: lectura de JSON y descubrimiento de la API ---------- */
+const JS_DAYS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+
+// Decodifica el formato "devalue" que usa SvelteKit en /__data.json
+function devalueDecode(arr) {
+  const memo = new Map();
+  const rev = (i) => {
+    if (i === -1) return undefined;
+    if (i === -2) return NaN;
+    if (i === -3) return Infinity;
+    if (i === -4) return -Infinity;
+    if (i === -5) return -0;
+    if (memo.has(i)) return memo.get(i);
+    const v = arr[i];
+    if (v === null || typeof v !== 'object') { memo.set(i, v); return v; }
+    if (Array.isArray(v)) {
+      if (typeof v[0] === 'string') {
+        if (v[0] === 'Date') { memo.set(i, v[1]); return v[1]; }
+        if (v[0] === 'BigInt') { const n = Number(v[1]); memo.set(i, n); return n; }
+        if (v[0] === 'Set') { const s = []; memo.set(i, s); v.slice(1).forEach((x) => s.push(rev(x))); return s; }
+        if (v[0] === 'Map' || v[0] === 'RegExp' || v[0] === 'Object') { memo.set(i, null); return null; }
+      }
+      const out = [];
+      memo.set(i, out);
+      v.forEach((x) => out.push(rev(x)));
+      return out;
+    }
+    const obj = {};
+    memo.set(i, obj);
+    Object.keys(v).forEach((k) => { obj[k] = rev(v[k]); });
+    return obj;
+  };
+  return arr.length ? rev(0) : null;
+}
+
+function findAnime(o, depth = 0) {
+  if (!o || typeof o !== 'object' || Array.isArray(o) || depth > 2) return null;
+  const slug = typeof o.slug === 'string' ? o.slug : '';
+  const urlStr = typeof o.url === 'string' ? o.url : '';
+  const title = [o.title, o.name, o.titulo].find((x) => typeof x === 'string' && x.trim());
+  if ((slug || urlStr) && title) return o;
+  for (const v of Object.values(o)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const f = findAnime(v, depth + 1);
+      if (f) return f;
+    }
+  }
+  return null;
+}
+
+function animeItem(o, baseUrl) {
+  const a = findAnime(o);
+  if (!a) return null;
+  const title = [a.title, a.name, a.titulo].find((x) => typeof x === 'string' && x.trim()).trim();
+  const slug = typeof a.slug === 'string' ? a.slug : '';
+  const url = slug ? api.abs('/media/' + slug, baseUrl) : api.abs(a.url, baseUrl);
+  let cover = '';
+  for (const k of ['cover', 'poster', 'image', 'imagen', 'thumbnail', 'portada']) {
+    if (typeof a[k] === 'string' && a[k]) { cover = a[k]; break; }
+  }
+  if (!cover && /^\d+$/.test(String(a.id == null ? '' : a.id))) cover = 'https://cdn.animeav1.com/covers/' + a.id + '.jpg';
+  return { title, cover: cover ? api.abs(cover, baseUrl) : '', url };
+}
+
+// Busca en un JSON los animes agrupados por día (claves "lunes"… o campos de día/fecha)
+function scheduleFromJson(root, baseUrl) {
+  const byDay = {};
+  const push = (day, item) => {
+    if (!day || !item) return;
+    const list = (byDay[day] = byDay[day] || []);
+    if (!list.some((x) => x.url === item.url)) list.push(item);
+  };
+  const finish = () =>
+    WEEK.filter((d) => byDay[d] && byDay[d].length).map((d) => ({ day: WEEK_LABEL[d], items: byDay[d] }));
+
+  // 1) objeto con claves de día: { lunes: [...], martes: [...] }
+  const keyed = (node, depth) => {
+    if (!node || typeof node !== 'object' || depth > 5) return false;
+    if (!Array.isArray(node)) {
+      const dayKeys = Object.keys(node).filter((k) => dayOf(k));
+      if (dayKeys.length >= 2) {
+        dayKeys.forEach((k) => {
+          const v = node[k];
+          (Array.isArray(v) ? v : Object.values(v || {})).forEach((e) => push(dayOf(k), animeItem(e, baseUrl)));
+        });
+        return true;
+      }
+    }
+    return Object.values(node).some((v) => keyed(v, depth + 1));
+  };
+  if (keyed(root, 0)) {
+    const r = finish();
+    if (r.length >= 2) return r;
+    Object.keys(byDay).forEach((k) => delete byDay[k]);
+  }
+
+  // 2) entradas con un campo de día u hora de emisión
+  const entries = [];
+  const walk = (node, depth) => {
+    if (!node || typeof node !== 'object' || depth > 7) return;
+    if (Array.isArray(node)) { node.forEach((n) => walk(n, depth + 1)); return; }
+    for (const [k, v] of Object.entries(node)) {
+      if (/day|dia|dow|broadcast|airing|aired|emisi|estreno|schedule|horario/i.test(k) && (typeof v === 'string' || typeof v === 'number')) {
+        entries.push({ node, key: k, v });
+      }
+    }
+    Object.values(node).forEach((v) => walk(v, depth + 1));
+  };
+  walk(root, 0);
+  const sundayFirst = entries.some((e) => typeof e.v === 'number' && e.v === 0 && /day|dia|dow/i.test(e.key));
+  entries.forEach(({ node, key, v }) => {
+    let day = '';
+    if (typeof v === 'string') {
+      day = dayOf(v);
+      if (!day && /\d{4}-\d{2}-\d{2}/.test(v)) {
+        const t = Date.parse(v);
+        if (!Number.isNaN(t)) day = JS_DAYS[new Date(t).getDay()];
+      }
+    } else if (v > 1e12) day = JS_DAYS[new Date(v).getDay()];
+    else if (v > 1e9) day = JS_DAYS[new Date(v * 1000).getDay()];
+    else if (/day|dia|dow/i.test(key) && v >= 0 && v <= 7) day = sundayFirst ? JS_DAYS[v] : v >= 1 ? WEEK[v - 1] : 'domingo';
+    if (day) push(day, animeItem(node, baseUrl));
+  });
+  return finish();
+}
+
+// Rutas de API que aparecen en la página y en los scripts de la ruta (SvelteKit)
+async function discoverEndpoints(html, doc, pageUrl) {
+  const found = [];
+  const add = (u) => {
+    try {
+      const full = api.abs(u, pageUrl);
+      if (!found.includes(full) && !isStaticAsset(full) && !/google|discord|facebook|cloudflare|gstatic|\/horario\/?$/i.test(full)) found.push(full);
+    } catch (_) {}
+  };
+  const re = /["'`]((?:https?:\/\/[a-z0-9.-]*animeav1[a-z0-9.-]*)?\/(?:api|ajax)\/[A-Za-z0-9_\-\/.?=&%]*)["'`]/g;
+  let m;
+  while ((m = re.exec(html))) add(m[1]);
+
+  const srcs = Array.from(doc.querySelectorAll('link[rel="modulepreload"][href], script[src]'))
+    .map((el) => el.getAttribute('href') || el.getAttribute('src'))
+    .filter((h) => h && /\/(nodes|chunks|entry)\//.test(h));
+  const re2 = /["'`]((?:https?:\/\/[a-z0-9.-]*animeav1[a-z0-9.-]*)?\/(?:(?:api|ajax)\/[A-Za-z0-9_\-\/.?=&%]*|[A-Za-z0-9_\-\/]*(?:horario|schedule|calendar)[A-Za-z0-9_\-\/.?=&%]*))["'`]/g;
+  for (const s of srcs.slice(0, 10)) {
+    try {
+      const js = await api.text(api.abs(s, pageUrl));
+      let mm;
+      while ((mm = re2.exec(js))) add(mm[1]);
+    } catch (_) {}
+  }
+  return { found, srcs };
+}
+
 return {
   id: 'animeav1',
   name: 'AnimeAV1',
@@ -605,9 +767,92 @@ return {
     const url = api.abs('/horario', BASE_URL);
     const html = await api.text(url);
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    const days = parseSchedule(doc, url);
-    if (days.length === 0) throw new Error('No se pudo leer el horario de la web');
-    return days;
+
+    // 1) si la página ya trae las tarjetas
+    const direct = parseSchedule(doc, url);
+    if (direct.length >= 2) return direct;
+
+    // 2) la página las carga con JS: buscar la API en la página y en sus scripts
+    const { found, srcs } = await discoverEndpoints(html, doc, url);
+    const defaults = ['/horario/__data.json', '/api/horario', '/api/schedule', '/api/schedules', '/api/calendar'].map((p) => api.abs(p, BASE_URL));
+    const tried = [];
+    for (const ep of found.concat(defaults).filter((v, i, a) => a.indexOf(v) === i).slice(0, 14)) {
+      const short = ep.replace(BASE_URL, '');
+      try {
+        const text = await api.text(ep, { headers: { Accept: 'application/json' } });
+        let data;
+        try { data = JSON.parse(text); } catch (_) { tried.push(short + ' (no JSON)'); continue; }
+        if (data && Array.isArray(data.nodes)) {
+          for (const node of data.nodes) {
+            if (node && Array.isArray(node.data)) {
+              const r = scheduleFromJson(devalueDecode(node.data), BASE_URL);
+              if (r.length >= 2) return r;
+            }
+          }
+        }
+        const r = scheduleFromJson(data, BASE_URL);
+        if (r.length >= 2) return r;
+        tried.push(short + ' (sin días)');
+      } catch (e) {
+        tried.push(short + ' (' + (e && e.status ? e.status : 'error') + ')');
+      }
+    }
+    throw new Error('probé: ' + (tried.join(' | ') || '-') + ' · scripts: ' + srcs.slice(0, 3).join(' | '));
+  },
+
+  // Episodios recién publicados (sección "Recientemente Actualizado" de la portada), en orden de salida
+  async latest() {
+    const url = api.abs('/', BASE_URL);
+    const html = await api.text(url);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const epInfo = (a) => {
+      const h = a.getAttribute('href') || '';
+      if (h.includes('#')) return null;
+      try {
+        const u = new URL(api.abs(h, url));
+        const m = u.pathname.match(/^\/media\/([^/]+)\/(\d+(?:\.\d+)?)\/?$/);
+        return m ? { slug: m[1], ep: m[2], full: u.href } : null;
+      } catch (_) { return null; }
+    };
+    const out = [];
+    const seen = new Set();
+    doc.querySelectorAll('a[href*="/media/"]').forEach((a) => {
+      const info = epInfo(a);
+      if (!info || seen.has(info.full)) return;
+
+      // tarjeta: sube mientras el contenedor solo tenga este episodio
+      let box = a;
+      for (let i = 0; i < 4 && box.parentElement; i++) {
+        const parent = box.parentElement;
+        const others = Array.from(parent.querySelectorAll('a[href*="/media/"]'))
+          .map(epInfo)
+          .filter((x) => x && x.full !== info.full);
+        if (others.length) break;
+        box = parent;
+      }
+      const img = box.querySelector('img');
+      const raw = img ? img.getAttribute('data-src') || img.getAttribute('src') || '' : '';
+
+      let title = (a.getAttribute('aria-label') || a.getAttribute('title') || a.textContent || '')
+        .replace(/\s+/g, ' ').trim().replace(/^Ver\s+/i, '');
+      title = title.replace(new RegExp('\\s+' + info.ep.replace('.', '\\.') + '$'), '').trim();
+      if (!title) {
+        const h = box.querySelector('h2, h3, h4');
+        title = h ? h.textContent.replace(/\s+/g, ' ').trim() : '';
+      }
+      if (!title) title = info.slug.replace(/-/g, ' ');
+
+      seen.add(info.full);
+      out.push({
+        title,
+        // la miniatura del episodio (thumbnails/ID) y la portada (covers/ID) comparten el mismo ID
+        cover: raw ? api.abs(raw.replace('/thumbnails/', '/covers/'), url) : '',
+        url: api.abs('/media/' + info.slug, BASE_URL),
+        note: 'Episodio ' + info.ep,
+        epUrl: info.full
+      });
+    });
+    return out;
   },
 
   async search(query, page = 1, filters = {}) {
@@ -978,9 +1223,19 @@ function setTab(t){
 }
 function render(){({home:rHome,search:rSearch,favs:rFavs,mods:rMods})[tab]()}
 const skeleton=()=>'<div class="grid">'+'<div class="sk"></div>'.repeat(9)+'</div>';
+const tidyTitle=t=>String(t||'').replace(/^thumbnail for\s+/i,'').trim();
 function grid(items){
-  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(i.title)+'</div>'+(i.note?'<div class="cn">'+esc(i.note)+'</div>':'')+'</button>').join('')+'</div>';
+  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><span class="ph">'+esc((tidyTitle(i.title)[0]||'?').toUpperCase())+'</span><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(tidyTitle(i.title))+'</div>'+(i.note?'<div class="cn">'+esc(i.note)+'</div>':'')+'</button>').join('')+'</div>';
 }
+document.addEventListener('error',e=>{
+  const im=e.target;if(!im||im.tagName!=='IMG'||im.dataset.fb||!/^https?:/i.test(im.src))return;
+  im.dataset.fb='1';
+  const card=im.closest('.card');let ref='';
+  try{ref=new URL(card?card.dataset.u:im.src).origin+'/'}catch(_){}
+  fetch(im.src,{headers:{Referer:ref}}).then(r=>r.ok?r.blob():Promise.reject()).then(b=>{
+    if(b&&b.size>500&&/image/i.test(b.type)){im.src=URL.createObjectURL(b);im.style.visibility='visible'}
+  }).catch(()=>{});
+},true);
 $('#main').addEventListener('click',e=>{
   const c=e.target.closest('.card');
   if(c)openDetail(c.dataset.m,c.dataset.u,{title:c.dataset.t,cover:c.dataset.c});
@@ -1001,7 +1256,12 @@ async function showSchedule(el){
   el.innerHTML='<p class="empty">Cargando horario…</p>';
   let days;
   try{days=await cached('s|'+m.id,30*60*1000,()=>m.schedule())}
-  catch(e){el.innerHTML='<p class="empty">No se pudo cargar el horario: '+esc(e.message)+'</p><button class="btn" id="schRetry">Reintentar</button>';const b=$('#schRetry');if(b)b.onclick=()=>showSchedule(el);return}
+  catch(e){
+    el.innerHTML='<p class="empty">No se pudo leer el horario por días ('+esc(e.message)+')</p><button class="btn" id="schRetry">Reintentar</button><h2 class="sec">En emisión</h2><div id="schFb"><p class="empty">Cargando…</p></div>';
+    const b=$('#schRetry');if(b)b.onclick=()=>{cached('s|'+m.id,0,()=>0);showSchedule(el)};
+    try{const r=await m.search('',1,{status:['emision']});const fb=$('#schFb');if(fb)fb.innerHTML=r.length?grid(r.map(i=>Object.assign({},i,{mod:m.id}))):''}catch(_){const fb=$('#schFb');if(fb)fb.innerHTML=''}
+    return
+  }
   days=(days||[]).filter(d=>d&&d.items&&d.items.length);
   if(!days.length){el.innerHTML='<p class="empty">El horario está vacío.</p>';return}
   const today=normD(DAY_NAMES[new Date().getDay()]);
@@ -1041,8 +1301,20 @@ async function loadFollow(){
   st.follow.rows.sort((a,b)=>pick.findIndex(x=>x.url===a.url)-pick.findIndex(x=>x.url===b.url));
   if(tab==='home'&&st===homeSt&&followList().length)drawHome();
 }
+async function loadLatest(){
+  const st=homeSt,m=cur();
+  if(typeof m.latest!=='function'||st.latest!==undefined)return;
+  st.latest=null;
+  try{st.latest=await cached('l|'+m.id,3*60*1000,()=>m.latest())}catch(e){st.latest=[]}
+  if(tab==='home'&&st===homeSt&&(st.items.length||st.done||st.err))drawHome();
+}
 function followHtml(){
   if(hAny())return '';
+  const m=cur();
+  if(typeof m.latest==='function'){
+    const l=(homeSt.latest||[]).slice(0,12).map(i=>Object.assign({},i,{mod:m.id,note:i.note+(i.epUrl&&viewed(PROG[epKey(m,{url:i.epUrl})])?' ✓':'')}));
+    return l.length?'<h2 class="sec">Últimos episodios</h2>'+grid(l)+'<h2 class="sec">Explorar</h2>':'';
+  }
   const f=followList();
   return f.length?'<h2 class="sec">Seguir mirando</h2>'+grid(f)+'<h2 class="sec">Explorar</h2>':'';
 }
@@ -1068,6 +1340,7 @@ async function rHome(){
   const m=cur();loadFilters(m);
   if(schedActive(HF)){$('#main').innerHTML=homeBar()+'<div id="sched"></div>';bindHomeBar();showSchedule($('#sched'));return}
   if(homeSt.mod!==m.id)homeSt={mod:m.id,items:[],page:0,done:false,loading:false,err:''};
+  if(!hAny()&&typeof m.latest==='function')loadLatest();
   if(!homeSt.items.length&&!homeSt.done){$('#main').innerHTML=homeBar()+skeleton();bindHomeBar();await loadHome();return}
   drawHome();
 }
@@ -1099,7 +1372,7 @@ function drawHome(){
     +(!st.done&&(st.items.length||st.err)?'<button class="btn more" id="more">'+(st.err?'Reintentar':'Cargar más')+'</button>':'')
     +(st.done&&st.items.length?'<p class="note" style="text-align:center;margin:18px 0">No hay más resultados</p>':'');
   mn.scrollTop=y;bindHomeBar();
-  if(!hAny())loadFollow();
+  if(!hAny()){if(typeof cur().latest==='function')loadLatest();else loadFollow()}
   const mb=$('#more');if(mb)mb.onclick=()=>{mb.textContent='Cargando…';loadHome()};
 }
 
