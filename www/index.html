@@ -69,7 +69,11 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 .ep .n{min-width:34px;height:34px;border-radius:9px;background:var(--card2);display:grid;place-items:center;font-weight:700;font-size:13px}
 .ep .t{flex:1;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ep .bar{position:absolute;left:0;bottom:0;height:3px;background:var(--ok)}
-.ep.done{opacity:.5}
+.ep .chk{margin-left:auto;flex:none;width:28px;height:28px;border-radius:50%;border:2px solid var(--mut);display:grid;place-items:center;font-size:14px;line-height:1;color:transparent}
+.ep.viewed{opacity:.62}
+.ep.viewed .n{background:var(--ok);color:#08210f}
+.ep.viewed .chk{background:var(--ok);border-color:var(--ok);color:#08210f}
+.dhead .dhimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #player{z-index:20;background:#000;overflow:hidden;--pl:#b9c6ff}
 #stage{position:absolute;inset:0;background:#000;user-select:none;touch-action:none}
 #vbox,#vbox video,#vbox iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
@@ -428,7 +432,7 @@ function setTab(t){
 function render(){({home:rHome,search:rSearch,favs:rFavs,mods:rMods})[tab]()}
 const skeleton=()=>'<div class="grid">'+'<div class="sk"></div>'.repeat(9)+'</div>';
 function grid(items){
-  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><img loading="lazy" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(i.title)+'</div>'+'</button>').join('')+'</div>';
+  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(i.title)+'</div>'+'</button>').join('')+'</div>';
 }
 $('#main').addEventListener('click',e=>{
   const c=e.target.closest('.card');
@@ -636,16 +640,20 @@ async function openDetail(modId,url,hint){
     $('.dbody',el).innerHTML='<p class="empty">No se pudo abrir este anime.<br>'+esc(err.message)+'</p>';
   }
 }
-function setHead(u){if(u)$('#dHead').style.backgroundImage='url("'+String(u).replace(/"/g,'%22')+'")'}
+function setHead(u){const h=$('#dHead');if(!h||!u)return;h.innerHTML='<img class="dhimg" referrerpolicy="no-referrer" alt="" src="'+esc(u)+'" onerror="this.remove()">'}
+const badCover=u=>!u||/logo|logito|favicon|placeholder|no-?image|\/web\.jpg/i.test(String(u));
+const pickCover=(d,h)=>[d&&d.cover,h&&h.cover].find(u=>!badCover(u))||(d&&d.cover)||(h&&h.cover)||'';
+const viewed=p=>!!p&&(p.done||(p.seen&&!p.d));
+function markSeen(key){if(!key)return;const p=PROG[key]||{};if(p.done||p.seen)return;p.seen=true;PROG[key]=p;saveProg()}
 const epKey=(m,e)=>m.id+'|'+e.url;
 function drawDetail(){
   const {m,d,url,hint}=D,el=$('#detail'),eps=d.episodes||[];
-  const title=d.title||hint.title,cover=d.cover||hint.cover;
+  const title=d.title||hint.title,cover=pickCover(d,hint);
   setHead(d.banner||cover);
-  const nextI=Math.max(0,eps.findIndex(e=>{const p=PROG[epKey(m,e)];return !(p&&p.done)}));
+  const nextI=Math.max(0,eps.findIndex(e=>!viewed(PROG[epKey(m,e)])));
   const started=eps.some(e=>PROG[epKey(m,e)]);
   $('.dbody',el).innerHTML=
-   '<div class="drow"><img class="dcover" src="'+esc(cover)+'" alt=""><div><h1>'+esc(title)+'</h1><div class="meta">'+[d.year,d.status,eps.length?eps.length+' episodios':''].filter(Boolean).map(esc).join(' · ')+'</div></div></div>'
+   '<div class="drow"><img class="dcover" referrerpolicy="no-referrer" src="'+esc(cover)+'" alt=""><div><h1>'+esc(title)+'</h1><div class="meta">'+[d.year,d.status,eps.length?eps.length+' episodios':''].filter(Boolean).map(esc).join(' · ')+'</div></div></div>'
    +'<div class="chips">'+(d.genres||[]).map(g=>'<span>'+esc(g)+'</span>').join('')+'</div>'
    +'<div class="acts">'+(eps.length?'<button class="btn" id="dGo">'+(started?'Continuar':'Ver')+' ep. '+esc(eps[nextI].number||nextI+1)+'</button>':'')
    +'<button class="btn ghost" id="dFav">'+(isFav(m.id,url)?'★ En mi lista':'☆ Favorito')+'</button>'
@@ -665,15 +673,24 @@ function drawEps(){
   let idx=eps.map((_,i)=>i);if(rev)idx.reverse();
   $('#eps').innerHTML=idx.map(i=>{
     const e=eps[i],p=PROG[epKey(m,e)]||{},pc=p.done?100:(p.d?Math.min(100,p.t/p.d*100):0);
-    return '<button class="ep'+(p.done?' done':'')+'" data-i="'+i+'"><span class="n">'+esc(e.number||i+1)+'</span><span class="t">'+esc(e.title||('Episodio '+(i+1)))+'</span>'+(pc?'<span class="bar" style="width:'+pc+'%"></span>':'')+'</button>';
+    return '<button class="ep'+(viewed(p)?' viewed':'')+'" data-i="'+i+'"><span class="n">'+esc(e.number||i+1)+'</span><span class="t">'+esc(e.title||('Episodio '+(i+1)))+'</span><span class="chk" data-chk="'+i+'" role="checkbox" aria-label="Marcar como visto">✓</span>'+(pc&&!viewed(p)?'<span class="bar" style="width:'+pc+'%"></span>':'')+'</button>';
   }).join('')||'<p class="empty">Este módulo no devolvió episodios.</p>';
 }
-$('#detail').addEventListener('click',e=>{const b=e.target.closest('.ep');if(b&&D)playFrom(+b.dataset.i)});
+$('#detail').addEventListener('click',e=>{
+  const c=e.target.closest('.chk');
+  if(c&&D){
+    e.stopPropagation();
+    const ep=D.d.episodes[+c.dataset.chk],k=epKey(D.m,ep),p=PROG[k];
+    if(viewed(p))delete PROG[k];else PROG[k]=Object.assign({},p,{seen:true,done:true});
+    saveProg();drawEps();return;
+  }
+  const b=e.target.closest('.ep');if(b&&D)playFrom(+b.dataset.i)
+});
 let busyPlay=false;
 async function playFrom(i){
   if(busyPlay||!D)return;
   const {m,d,url,hint}=D,title=d.title||hint.title,ep=d.episodes[i];
-  addHist({mod:m.id,url,title,cover:d.cover||hint.cover});
+  addHist({mod:m.id,url,title,cover:pickCover(d,hint)});
   const cfg={
     title,list:d.episodes,idx:i,pref:null,
     key:k=>epKey(m,d.episodes[k]),
@@ -789,6 +806,7 @@ async function loadEp(i){
     srcs=srcs.map(s=>Object.assign({},s,{type:s.type||guess(s.url)}));
   }
   P.srcs=srcs;curK=-1;
+  if(P.key)markSeen(P.key(i));
   if(pick<0){
     const byPref=P.pref?srcs.findIndex(s=>s.label===P.pref&&s.type!=='external'):-1;
     pick=byPref>=0?byPref:srcs.findIndex(s=>s.type!=='external');
