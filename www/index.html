@@ -98,7 +98,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 .tools{display:flex;justify-content:space-between;align-items:center;gap:6px}
 .tools button{font-size:14px;font-weight:700;padding:8px 6px}
 #stage.novid #ctl{opacity:1;pointer-events:none;background:none}
-#stage.novid .side,#stage.novid .cmid,#stage.novid .seek,#stage.novid #pLock,#stage.novid #pFit,#stage.novid #pSpd,#stage.novid #pSkip,#stage.novid #pTitle{display:none}
+#stage.novid .side,#stage.novid .cmid,#stage.novid .seek,#stage.novid #pLock,#stage.novid #pSpd,#stage.novid #pSkip,#stage.novid #pTitle{display:none}
 #stage.novid #pBack{pointer-events:auto;background:#0008!important;border-radius:50%;width:42px;height:42px;padding:0}
 #stage.novid .cbot{position:absolute;top:max(8px,env(safe-area-inset-top));right:max(14px,env(safe-area-inset-right))}
 #stage.novid .tools{pointer-events:auto;gap:8px}
@@ -154,7 +154,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
       <div class="cmid"><button id="pRw" aria-label="Atrasar 10 segundos">↺ 10</button><button id="pPlay" aria-label="Reproducir o pausar"></button><button id="pFw" aria-label="Adelantar 10 segundos">10 ↻</button></div>
       <div class="cbot">
         <div class="seek"><span id="pCur">0:00</span><input type="range" id="pSeek" min="0" max="1000" value="0"><span id="pDur">0:00</span></div>
-        <div class="tools"><button id="pFit">Escala: Ajustar</button><button id="pLock">Bloquear</button><button id="pEps">Episodios</button><button id="pQ">Calidad</button><button id="pSpd">1x</button></div>
+        <div class="tools"><button id="pFit">Escala: Ajustar</button><button id="pLock">Bloquear</button><button id="pEps">Episodios</button><button id="pQ">Servidor</button><button id="pSpd">1x</button></div>
       </div>
     </div>
     <button id="pUnlock" hidden aria-label="Desbloquear">🔓</button>
@@ -525,14 +525,28 @@ function drawEps(){
   }).join('')||'<p class="empty">Este módulo no devolvió episodios.</p>';
 }
 $('#detail').addEventListener('click',e=>{const b=e.target.closest('.ep');if(b&&D)playFrom(+b.dataset.i)});
-function playFrom(i){
-  const {m,d,url,hint}=D,title=d.title||hint.title;
+let busyPlay=false;
+async function playFrom(i){
+  if(busyPlay||!D)return;
+  const {m,d,url,hint}=D,title=d.title||hint.title,ep=d.episodes[i];
   addHist({mod:m.id,url,title,cover:d.cover||hint.cover});
-  openPlayer({
-    title,list:d.episodes,idx:i,
+  const cfg={
+    title,list:d.episodes,idx:i,pref:null,
     key:k=>epKey(m,d.episodes[k]),
     load:k=>m.videos(d.episodes[k].url,{detail:d,episode:d.episodes[k]})
-  });
+  };
+  busyPlay=true;toast('Buscando servidores…');
+  let srcs;
+  try{srcs=(await cfg.load(i))||[]}catch(err){busyPlay=false;return toast('Error: '+err.message)}
+  busyPlay=false;
+  srcs=srcs.map(s=>Object.assign({},s,{type:s.type||guess(s.url)}));
+  if(!srcs.length)return toast('Este módulo no devolvió servidores para este episodio');
+  const go=k=>{
+    if(srcs[k].type==='external'){openExt(srcs[k].url);return}
+    cfg.pref=srcs[k].label||null;cfg.pre={i,srcs,k};openPlayer(cfg);
+  };
+  if(srcs.length===1)return go(0);
+  openSheet({title:'Elegir servidor',items:srcs.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),on:false})),multi:false,keep:true,onPick:k=>{if(k!=null)go(k)}});
 }
 
 /* ============ panel de opciones (filtros, episodios, calidad) ============ */
@@ -572,7 +586,21 @@ const guess=u=>/\.m3u8(\?|#|$)/i.test(u)?'hls':/\.(mp4|webm|m4v|mov)(\?|#|$)/i.t
 const setMsg=t=>{$('#pMsg').textContent=t||''};
 function setPlayIcon(p){$('#pPlay').innerHTML=p?IC_PLAY:IC_PAUSE}
 function updBars(){$('#bBri').style.height=clamp((bright-0.2)/1.4*100,0,100)+'%';$('#bVol').style.height=Math.round(vol*100)+'%'}
-function applyFit(){if(vid)vid.style.objectFit=FITS[fitI][0];$('#pFit').textContent='Escala: '+FITS[fitI][1]}
+function applyFit(){
+  const mode=FITS[fitI][0];
+  $('#pFit').textContent='Escala: '+FITS[fitI][1];
+  if(vid)vid.style.objectFit=mode;
+  const f=$('#vbox iframe');
+  if(f){
+    /* reproductor incrustado: se escala toda su ventana suponiendo video 16:9 */
+    const st=$('#stage'),r=(st.clientWidth/Math.max(1,st.clientHeight))/(16/9);
+    let t='';
+    if(mode==='cover')t='scale('+Math.max(r,1/r)+')';
+    else if(mode==='fill')t=r>=1?'scale('+r+',1)':'scale(1,'+(1/r)+')';
+    f.style.transformOrigin='center center';f.style.transform=t;
+  }
+}
+window.addEventListener('resize',()=>{if(P)applyFit()});
 function applyBright(){if(vid)vid.style.filter=bright===1?'':'brightness('+bright+')';updBars()}
 function hud(t){const e=$('#hud');e.textContent=t;e.classList.add('on');clearTimeout(hudT)}
 function hideHud(ms){clearTimeout(hudT);hudT=setTimeout(()=>$('#hud').classList.remove('on'),ms||500)}
@@ -596,14 +624,20 @@ async function loadEp(i){
   else{$('#pT1').textContent=P.title;$('#pT2').textContent=(ep.title&&ep.title!==P.title)?ep.title:''}
   cleanupVideo();setMsg('Buscando fuentes…');
   $('#stage').classList.add('novid');
-  let srcs;
-  try{srcs=(await P.load(i))||[]}catch(err){if(P&&P.idx===i)setMsg('Error: '+err.message);return}
-  if(!P||P.idx!==i)return;
-  srcs=srcs.map(s=>Object.assign({},s,{type:s.type||guess(s.url)}));
+  let srcs,pick=-1;
+  if(P.pre&&P.pre.i===i){srcs=P.pre.srcs;pick=P.pre.k;P.pre=null}
+  else{
+    try{srcs=(await P.load(i))||[]}catch(err){if(P&&P.idx===i)setMsg('Error: '+err.message);return}
+    if(!P||P.idx!==i)return;
+    srcs=srcs.map(s=>Object.assign({},s,{type:s.type||guess(s.url)}));
+  }
   P.srcs=srcs;curK=-1;
-  const first=srcs.findIndex(s=>s.type!=='external');
-  if(first<0){setMsg(srcs.length?'Estas fuentes se abren fuera de la app. Elige otra en Calidad.':'Este módulo no devolvió fuentes de video para este episodio.');return}
-  pickSrc(first);
+  if(pick<0){
+    const byPref=P.pref?srcs.findIndex(s=>s.label===P.pref&&s.type!=='external'):-1;
+    pick=byPref>=0?byPref:srcs.findIndex(s=>s.type!=='external');
+  }
+  if(pick<0){setMsg(srcs.length?'Estas fuentes se abren fuera de la app. Elige otra en Servidor.':'Este módulo no devolvió fuentes de video para este episodio.');return}
+  pickSrc(pick);
 }
 function pickSrc(k){
   const s=P.srcs[k];
@@ -621,6 +655,7 @@ function startSource(s){
   if(s.type==='embed'){
     stage.classList.add('novid');
     box.innerHTML='<iframe src="'+esc(s.url)+'" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+    applyFit();
     return;
   }
   stage.classList.remove('novid');stage.classList.add('show');
@@ -685,7 +720,7 @@ $('#pEps').onclick=()=>{
 };
 $('#pQ').onclick=()=>{
   if(!P||!P.srcs||!P.srcs.length)return toast('Aún no hay fuentes');
-  openSheet({title:'Calidad / fuente',items:P.srcs.map((s,k)=>({k,label:s.label||('Fuente '+(k+1)),on:k===curK})),multi:false,keep:true,onPick:k=>{if(k!=null)pickSrc(k)}});
+  openSheet({title:'Servidor',items:P.srcs.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),on:k===curK})),multi:false,keep:true,onPick:k=>{if(k!=null){P.pref=P.srcs[k].label||null;pickSrc(k)}}});
 };
 
 /* ---- gestos: izquierda=brillo, derecha=volumen, horizontal=adelantar/atrasar, doble toque=±10 s ---- */
