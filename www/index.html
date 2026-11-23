@@ -45,6 +45,11 @@ textarea{resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:12px
 main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 .mrow{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:12px;padding:12px;margin-bottom:8px}
 .mrow>div{flex:1;min-width:0}
+.crow{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:14px;padding:12px;margin-bottom:8px}
+.cic{flex:none;width:56px;height:56px;border-radius:16px;display:grid;place-items:center;font-weight:800;font-size:18px;color:#fff}
+.cin{flex:1;min-width:0}.cin b{display:block;font-size:16px}.cin small{display:block;color:var(--mut);font-size:12px;margin-top:2px}
+.dl{flex:none;width:46px;height:46px;border-radius:99px;border:1px solid var(--card2);background:none;color:var(--ac);font-size:20px;display:grid;place-items:center}
+.dl.ok{color:var(--ok)}.dl.up{color:#ffd166}
 .mrow small{display:block;color:var(--mut);margin-top:2px;font-size:11px}
 .tag{font-size:11px;color:var(--ok);border:1px solid var(--ok);border-radius:999px;padding:3px 8px}
 .note{color:var(--mut);font-size:12px;line-height:1.5}
@@ -1039,49 +1044,6 @@ return {
 })();
 BUILTIN.builtin=true;
 
-/* ============ módulo incluido: AniList (catálogo oficial, solo tráilers) ============ */
-const ANILIST=(function(){
-const ANI='https://graphql.anilist.co';
-async function aniQ(query,variables){
-  const r=await fetch(ANI,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({query,variables})});
-  const j=await r.json();if(j.errors)throw new Error(j.errors[0].message);return j.data;
-}
-const F='id title{romaji english} coverImage{extraLarge large} seasonYear format';
-const mapM=m=>({title:m.title.english||m.title.romaji,cover:m.coverImage.extraLarge||m.coverImage.large,url:String(m.id),sub:[m.format,m.seasonYear].filter(Boolean).join(' · ')});
-const GENRES=[['Action','Acción'],['tag:Martial Arts','Artes Marciales'],['tag:Cars','Autos'],['Adventure','Aventura'],['tag:School','Colegial'],['Comedy','Comedia'],['Slice of Life','Cosas de la vida'],['tag:Demons','Demonios'],['Drama','Drama'],['Fantasy','Fantasía'],['tag:Isekai','Isekai'],['Horror','Terror'],['Mahou Shoujo','Magia (Mahou Shoujo)'],['Mecha','Mecha'],['Music','Música'],['Mystery','Misterio'],['tag:Military','Militar'],['Psychological','Psicológico'],['Romance','Romance'],['Sci-Fi','Ciencia ficción'],['tag:Super Power','Superpoderes'],['Sports','Deportes'],['Supernatural','Sobrenatural'],['Thriller','Suspenso'],['tag:Vampire','Vampiros']].sort((a,b)=>a[1].localeCompare(b[1],'es'));
-const BUILTIN_FILTERS=[
-  {id:'genre',label:'Género',options:GENRES.map(g=>({v:g[0],t:g[1]}))},
-  {id:'type',label:'Tipo',options:[{v:'TV',t:'TV'},{v:'MOVIE',t:'Película'},{v:'OVA',t:'OVA'},{v:'ONA',t:'ONA'},{v:'SPECIAL',t:'Especial'}]},
-  {id:'status',label:'Estado',options:[{v:'RELEASING',t:'En emisión'},{v:'FINISHED',t:'Finalizado'},{v:'NOT_YET_RELEASED',t:'Próximamente'}]}
-];
-const M={
-  id:'anilist',name:'AniList (catálogo)',version:1,builtin:true,filters:BUILTIN_FILTERS,
-  async home(p){const d=await aniQ('query($p:Int){Page(page:$p,perPage:24){media(type:ANIME,sort:TRENDING_DESC,isAdult:false){'+F+'}}}',{p:p||1});return d.Page.media.map(mapM)},
-  async search(q,p,f){
-    f=f||{};const g=f.genre||[];
-    const genres=g.filter(x=>x.indexOf('tag:')!==0),tags=g.filter(x=>x.indexOf('tag:')===0).map(x=>x.slice(4));
-    const d=await aniQ('query($p:Int,$s:String,$g:[String],$t:[String],$f:[MediaFormat],$st:[MediaStatus],$so:[MediaSort]){Page(page:$p,perPage:24){media(type:ANIME,search:$s,genre_in:$g,tag_in:$t,format_in:$f,status_in:$st,sort:$so,isAdult:false){'+F+'}}}',
-      {p:p||1,s:q||null,g:genres.length?genres:null,t:tags.length?tags:null,f:(f.type&&f.type.length)?f.type:null,st:(f.status&&f.status.length)?f.status:null,so:[q?'SEARCH_MATCH':'POPULARITY_DESC']});
-    return d.Page.media.map(mapM);
-  },
-  async details(url){
-    const d=await aniQ('query($id:Int){Media(id:$id){id title{romaji english} coverImage{extraLarge} bannerImage description genres seasonYear status episodes nextAiringEpisode{episode} trailer{id site} streamingEpisodes{title thumbnail url site}}}',{id:+url});
-    const m=d.Media,se=m.streamingEpisodes||[];let eps;
-    if(se.length)eps=se.map((e,i)=>({number:i+1,title:e.title,url:e.url}));
-    else{const n=m.episodes||(m.nextAiringEpisode?m.nextAiringEpisode.episode-1:0);eps=Array.from({length:n},(_,i)=>({number:i+1,title:'Episodio '+(i+1),url:'ani:'+m.id+':'+(i+1)}))}
-    return{title:m.title.english||m.title.romaji,cover:m.coverImage.extraLarge,banner:m.bannerImage,description:m.description,genres:m.genres,year:m.seasonYear,status:m.status,episodes:eps,trailer:m.trailer&&m.trailer.site==='youtube'?m.trailer.id:null};
-  },
-  async videos(url,ctx){
-    const out=[];
-    if(/^https?:/.test(url))out.push({label:'Ver en la plataforma oficial',url,type:'external'});
-    if(ctx&&ctx.detail&&ctx.detail.trailer)out.push({label:'Tráiler',url:'https://www.youtube.com/embed/'+ctx.detail.trailer,type:'embed'});
-    return out;
-  }
-};
-return M;
-})();
-
-
 /* ============ plantilla que se copia para pedirle módulos a otra IA ============ */
 const TEMPLATE=`// MÓDULO PARA AnimeHub
 // Es un archivo JavaScript. Debe terminar con "return { ... }".
@@ -1214,15 +1176,15 @@ function compile(code){
   return m;
 }
 let installed=LS.get('mods',[]);
-let mods=[ANILIST,BUILTIN];
+let mods=[BUILTIN];
 function loadMods(){
-  mods=[ANILIST,BUILTIN];
-  installed.forEach(it=>{try{const m=compile(it.code);if(m.id!==BUILTIN.id&&m.id!==ANILIST.id)mods.push(m)}catch(e){console.error('Módulo '+it.id,e)}});
+  mods=[BUILTIN];
+  installed.forEach(it=>{try{const m=compile(it.code);if(m.id!==BUILTIN.id)mods.push(m)}catch(e){console.error('Módulo '+it.id,e)}});
   rebuildSel();
 }
 const modById=id=>mods.find(m=>m.id===id);
-if(!LS.get('activeV2')){LS.set('active','anilist');LS.set('activeV2',1)}
-const cur=()=>modById(LS.get('active','anilist'))||ANILIST;
+if(!LS.get('activeV3')){LS.set('active','animeav1');LS.set('activeV3',1)}
+const cur=()=>modById(LS.get('active','animeav1'))||BUILTIN;
 function rebuildSel(){
   const a=cur().id;
   $('#modSel').innerHTML=mods.map(m=>'<option value="'+esc(m.id)+'"'+(m.id===a?' selected':'')+'>'+esc(m.name)+'</option>').join('');
@@ -1350,7 +1312,7 @@ async function showSchedule(el){
   if(!days.some(d=>normD(d.day)===SCHED.day))SCHED.day=normD((days.find(d=>normD(d.day)===today)||days[0]).day);
   const draw=()=>{
     const sel=days.find(d=>normD(d.day)===SCHED.day)||days[0];
-    el.innerHTML='<div class="days">'+days.map(d=>'<button type="button" data-d="'+esc(normD(d.day))+'" class="'+(normD(d.day)===SCHED.day?'on':'')+'">'+esc(String(d.day).toUpperCase())+' <small class="cnt">'+d.items.length+'</small></button>').join('')+'</div>'+grid(sel.items.map(i=>Object.assign({},i,{mod:m.id},m.id==='anilist'&&i.aid?{url:String(i.aid),q:''}:{})));
+    el.innerHTML='<div class="days">'+days.map(d=>'<button type="button" data-d="'+esc(normD(d.day))+'" class="'+(normD(d.day)===SCHED.day?'on':'')+'">'+esc(String(d.day).toUpperCase())+' <small class="cnt">'+d.items.length+'</small></button>').join('')+'</div>'+grid(sel.items.map(i=>Object.assign({},i,{mod:m.id},{})));
     const dv=el.querySelector('.days'),on=el.querySelector('.days .on');
     if(dv&&on)dv.scrollLeft=on.offsetLeft-dv.clientWidth/2+on.clientWidth/2;
   };
@@ -1536,6 +1498,44 @@ function rFavs(){
 }
 
 /* ---- Módulos ---- */
+/* ---- catálogo de módulos (se descarga desde el repositorio de la app) ---- */
+const CATALOG_URLS=['https://raw.githubusercontent.com/almejaqtk-sudo/animehub/main/modules/index.json','https://raw.githubusercontent.com/almejaqtk-sudo/animehub/master/modules/index.json'];
+let CAT=null;
+async function loadCatalog(force){
+  if(CAT&&!force&&!CAT.err)return CAT;
+  let err='';
+  for(const u of CATALOG_URLS){
+    try{
+      const j=JSON.parse(await api.text(u+'?t='+Date.now()));
+      const items=(Array.isArray(j)?j:(j.modules||[])).filter(x=>x&&x.id&&x.file);
+      CAT={items,base:u,err:''};return CAT;
+    }catch(e){err=e.message||'sin conexión'}
+  }
+  CAT={items:[],base:'',err};return CAT;
+}
+const catColor=id=>{let h=0;for(const c of String(id))h=(h*31+c.charCodeAt(0))%360;return 'hsl('+h+',45%,32%)'};
+function drawCatalog(){
+  const box=$('#catBox');if(!box||!CAT)return;
+  if(CAT.err){box.innerHTML='<p class="note">No se pudo cargar el catálogo ('+esc(CAT.err)+').</p><button class="btn ghost" id="catRetry">Reintentar</button>';return}
+  if(!CAT.items.length){box.innerHTML='<p class="note">El catálogo está vacío.</p>';return}
+  box.innerHTML=CAT.items.map(x=>{
+    const ins=mods.find(m=>m.id===x.id),v=Number(x.version)||0,iv=ins?(Number(ins.version)||0):-1;
+    const btn=!ins?'<button class="dl" data-cat="'+esc(x.id)+'" aria-label="Descargar">⬇</button>'
+      :(v>iv&&!ins.builtin?'<button class="dl up" data-cat="'+esc(x.id)+'" aria-label="Actualizar">⟳</button>':'<span class="dl ok" title="Instalado">✓</span>');
+    return '<div class="crow"><div class="cic" style="background:'+catColor(x.id)+'">'+esc(String(x.name||x.id).slice(0,2))+'</div>'
+      +'<div class="cin"><b>'+esc(x.name||x.id)+'</b><small>'+esc(x.description||'')+'</small><small>'+esc(x.author||'')+' · v'+esc(x.version||1)+'</small></div>'+btn+'</div>';
+  }).join('');
+}
+async function installFromCatalog(id,btn){
+  const x=CAT&&CAT.items.find(i=>i.id===id);if(!x)return;
+  try{
+    if(btn)btn.textContent='…';
+    const url=new URL(x.file,CAT.base).href;
+    installCode(await api.text(url+'?t='+Date.now()));
+    rMods();
+  }catch(err){if(btn)btn.textContent='⬇';toast('Error: '+err.message,6000)}
+}
+
 function rMods(){
   const a=cur().id;
   $('#main').innerHTML=
@@ -1543,24 +1543,23 @@ function rMods(){
      +(a===m.id?'<span class="tag">activo</span>':'<button class="sm" data-act="use" data-id="'+esc(m.id)+'">Usar</button>')
      +(!m.builtin&&!hasFilters(m)?'<button class="sm" data-act="fprompt" data-id="'+esc(m.id)+'">+ Géneros</button>':'')
      +(m.builtin?'':'<button class="sm del" data-act="del" data-id="'+esc(m.id)+'">Quitar</button>')+'</div>').join('')
+   
+   +'<h3>Catálogo de módulos</h3><div id="catBox"><p class="note">Cargando catálogo…</p></div>'
    +'<h3>Instalar un módulo</h3>'
-   +'<input id="mUrl" placeholder="Enlace al archivo .js del módulo"><button class="btn" id="mInstUrl">Instalar desde enlace</button>'
-   +'<textarea id="mCode" rows="6" placeholder="…o pega aquí el código del módulo"></textarea><button class="btn" id="mInstCode">Instalar código pegado</button>'
+   +'<textarea id="mCode" rows="6" placeholder="Pega aquí el código del módulo"></textarea><button class="btn" id="mInstCode">Instalar código pegado</button>'
    +'<button class="btn ghost" id="mInstFile">Instalar desde archivo .js</button><input type="file" id="mFile" accept=".js,.txt,text/javascript,text/plain,application/javascript" hidden>'
    +'<button class="btn ghost" id="mTpl">Copiar plantilla para pedirle módulos a tu IA</button>'
-   +'<p class="note">Un módulo es código que corre dentro de la app con acceso a internet. Instala solo módulos que hayas creado tú o de personas en las que confíes.</p>'
-   +'<h3>Reproducir un enlace directo</h3>'
-   +'<input id="dUrl" placeholder="https://…/video.mp4 o .m3u8"><button class="btn" id="dPlay">Reproducir</button>';
+   +'<p class="note">Un módulo es código que corre dentro de la app con acceso a internet. Instala solo módulos que hayas creado tú o de personas en las que confíes.</p>';
+  loadCatalog().then(drawCatalog);
 }
 $('#main').addEventListener('click',async e=>{
   const t=e.target;
+  const cb=t.closest&&t.closest('[data-cat]');
+  if(cb){installFromCatalog(cb.dataset.cat,cb);return}
+  if(t.id==='catRetry'){CAT=null;const bx=$('#catBox');if(bx)bx.innerHTML='<p class="note">Cargando…</p>';loadCatalog(true).then(drawCatalog);return}
   if(t.dataset.act==='fprompt'){copyPrompt(t.dataset.id)}
   else if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();rMods()}
-  else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','anilist');homeSt={mod:null};loadMods();rMods()}
-  else if(t.id==='mInstUrl'){
-    const u=$('#mUrl').value.trim();if(!u)return toast('Escribe el enlace');
-    try{t.textContent='Descargando…';installCode(await api.text(u));rMods()}catch(err){t.textContent='Instalar desde enlace';toast('Error: '+err.message)}
-  }
+  else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','animeav1');homeSt={mod:null};loadMods();rMods()}
   else if(t.id==='mInstCode'){
     const c=$('#mCode').value.trim();if(!c)return toast('Pega el código primero');
     try{installCode(c);rMods()}catch(err){toast('Error: '+err.message+(err instanceof SyntaxError?' · se pegaron '+c.length+' caracteres, termina en «'+c.slice(-25).replace(/\s+/g,' ')+'». Si no termina en "};" el texto se cortó: usa "Instalar desde archivo".':''),9000)}
@@ -1569,10 +1568,6 @@ $('#main').addEventListener('click',async e=>{
   else if(t.id==='mTpl'){
     try{await navigator.clipboard.writeText(TEMPLATE);toast('Plantilla copiada')}
     catch(err){$('#mCode').value=TEMPLATE;toast('Plantilla puesta en el cuadro de código')}
-  }
-  else if(t.id==='dPlay'){
-    const u=$('#dUrl').value.trim();if(!/^https?:\/\//i.test(u))return toast('Escribe un enlace válido');
-    openPlayer({title:'Enlace directo',list:[{title:'Video'}],idx:0,load:async()=>[{label:'Directo',url:u,type:guess(u)}],key:null});
   }
 });
 
