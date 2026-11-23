@@ -251,7 +251,8 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 /* ============ utilidades ============ */
 const $=(s,e=document)=>e.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const strip=h=>new DOMParser().parseFromString(String(h||'').replace(/<br\s*\/?>/gi,'\n'),'text/html').body.textContent.trim();
+const strip=h=>new DOMParser().parseFromString(String(h||'').replace(/<br\s*\/?>/gi,'
+'),'text/html').body.textContent.trim();
 const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 const fmt=s=>{if(!isFinite(s)||s<0)return'0:00';s=Math.floor(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0')};
 let toastT;
@@ -269,16 +270,9 @@ const api={
 /* ============ módulo principal incluido: AnimeAV1 ============ */
 const BUILTIN=(function(){
 const BASE_URL = 'https://animeav1.com';
-
-/* ---------- FILTROS (los mismos que tiene la web en /catalogo) ---------- */
-// Parámetro de URL que usa la web para cada filtro: /catalogo?genre=accion&status=emision&category=tv-anime&page=2
 const FILTER_PARAM = { genre: 'genre', type: 'category', status: 'status' };
-
 const slugify = (s) =>
-  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[()]/g, '').trim().replace(/\s+/g, '-');
-
-// Géneros tal como los muestra la web. El valor (v) es el "slug" de la URL.
-// Si algún género no devuelve resultados, corrige aquí su slug: { v: 'slug-real', t: 'Nombre' }
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[()]/g, '').trim().replace(/\s+/g, '-');
 const GENRE_NAMES = [
   'Acción', 'Antropomórfico', 'Artes Marciales', 'Aventura', 'Carreras', 'Ciencia Ficción', 'Comedia',
   'Deportes', 'Detectives', 'Drama', 'Elenco adulto', 'Escolares', 'Espacial', 'Fantasía', 'Gastronomía',
@@ -287,7 +281,6 @@ const GENRE_NAMES = [
   'Recuentos de la vida', 'Romance', 'Samurai', 'Seinen', 'Shoujo', 'Shounen', 'Sobrenatural',
   'Superpoderes', 'Suspenso', 'Terror', 'Vampiros', 'Yaoi', 'Yuri'
 ];
-
 const FILTERS = [
   { id: 'genre', label: 'Género', multi: false, options: GENRE_NAMES.map((n) => ({ v: slugify(n), t: n })) },
   {
@@ -304,10 +297,7 @@ const FILTERS = [
     ]
   }
 ];
-
-const isNotFound = (e) => !!e && (e.status === 404 || /\b404\b/.test(String(e.message || '')));
-
-/* ---------- SERVIDORES ---------- */
+const isNotFound = (e) => !!e && (e.status === 404 || /404/.test(String(e.message || '')));
 const FAST_SERVERS = [
   { priority: 0, name: 'HLS', match: /zilla-networks/i, type: 'embed' },
   { priority: 1, name: 'Streamwish', match: /(streamwish|wish|hglink|swiftplayers|alions|filelions|vidhide)/i, type: 'embed' },
@@ -319,49 +309,26 @@ const FAST_SERVERS = [
   { priority: 7, name: 'Doodstream', match: /(dood|ds2play|d0000d|do7go)/i, type: 'embed' },
   { priority: 8, name: 'Mega', match: /mega\.nz/i, type: 'embed' }
 ];
-
 const BLOCKED_SERVERS = [
   /(fembed|feurl|fe\.|ncdn|streamango|openload|rapidvideo|verystream|clipwatching|jetload|mixdrop|upstream|voe|uqload|sbplay|sbembed|streamsb|embedrise|animeav1\.com\/(assets|static|img|js|css))/i
 ];
-
 function classifyFastServer(rawUrl) {
   const url = String(rawUrl || '').trim();
   if (!url || !/^https?:\/\//i.test(url)) return null;
-
-  for (const blocked of BLOCKED_SERVERS) {
-    if (blocked.test(url)) return null;
-  }
-
+  for (const blocked of BLOCKED_SERVERS) { if (blocked.test(url)) return null; }
   for (const srv of FAST_SERVERS) {
-    if (srv.match.test(url)) {
-      return {
-        priority: srv.priority,
-        label: srv.name,
-        url,
-        type: srv.type
-      };
-    }
+    if (srv.match.test(url)) return { priority: srv.priority, label: srv.name, url, type: srv.type };
   }
-
-  if (/\.m3u8(\?|$)/i.test(url)) {
-    return { priority: 0, label: 'HLS Rápido', url, type: 'hls' };
-  }
-
+  if (/\.m3u8(\?|$)/i.test(url)) return { priority: 0, label: 'HLS Rápido', url, type: 'hls' };
   if (/\.mp4(\?|$)/i.test(url) && !/(thumb|poster|preview|cover|ads|promo|sample)/i.test(url)) {
     return { priority: 1, label: 'MP4 Rápido', url, type: 'mp4' };
   }
-
   return null;
 }
-
-
-// Texto de contexto (atributos, clases y texto corto del elemento y sus padres) para que la app detecte "sub" / "latino" / "español"
 function ctxLang(el) {
-  let t = '';
-  let n = el;
+  let t = '', n = el;
   for (let i = 0; i < 4 && n && n.getAttribute; i++) {
-    t += ' ' + ['data-lang', 'data-audio', 'data-language', 'data-idioma', 'aria-label', 'title']
-      .map((a) => n.getAttribute(a) || '').join(' ');
+    t += ' ' + ['data-lang', 'data-audio', 'data-language', 'data-idioma', 'aria-label', 'title'].map((a) => n.getAttribute(a) || '').join(' ');
     if (i < 2) {
       const own = (n.textContent || '').replace(/\s+/g, ' ').trim();
       if (own.length <= 40) t += ' ' + own;
@@ -370,29 +337,21 @@ function ctxLang(el) {
   }
   return t;
 }
-
 function pickText(doc, selectors) {
   for (const sel of selectors) {
     const el = doc.querySelector(sel);
-    if (el && el.textContent && el.textContent.trim()) {
-      return el.textContent.trim();
-    }
+    if (el && el.textContent && el.textContent.trim()) return el.textContent.trim();
   }
   return '';
 }
-
 function pickAttr(doc, selectors, attr) {
   for (const sel of selectors) {
     const el = doc.querySelector(sel);
     const val = el ? el.getAttribute(attr) : '';
-    if (val && val.trim()) {
-      return val.trim();
-    }
+    if (val && val.trim()) return val.trim();
   }
   return '';
 }
-
-// Portada real: prueba los atributos "lazy" antes que src y descarta marcadores de posición
 function imgUrl(img, baseUrl) {
   if (!img) return '';
   const bad = (u) => !u || /^data:/i.test(u) || /(placeholder|blank|loading|lazy\.|noimage|default)/i.test(u);
@@ -403,746 +362,144 @@ function imgUrl(img, baseUrl) {
   const raw = cand.find((u) => !bad(u)) || '';
   return raw ? api.abs(raw, baseUrl) : '';
 }
-
 function parseCardList(doc, baseUrl) {
-  const cardSelectors = [
-    'article',
-    '.anime-card',
-    '.grid a[href*="/anime/"]',
-    'a[href*="/anime/"]'
-  ];
-
+  const cardSelectors = ['article', '.anime-card', '.grid a[href*="/anime/"]', 'a[href*="/anime/"]'];
   let cards = [];
   for (const sel of cardSelectors) {
     const found = Array.from(doc.querySelectorAll(sel));
-    if (found.length > 0) {
-      cards = found;
-      break;
-    }
+    if (found.length > 0) { cards = found; break; }
   }
-
-  const seen = new Set();
-  const items = [];
-
+  const seen = new Set(), items = [];
   for (const card of cards) {
     const link = card.matches('a') ? card : card.querySelector('a[href*="/anime/"]') || card.querySelector('a');
     const href = link ? link.getAttribute('href') || '' : '';
     if (!href || href === '#' || href.startsWith('javascript:')) continue;
-
     const absUrl = api.abs(href, baseUrl);
     if (seen.has(absUrl)) continue;
     seen.add(absUrl);
-
     const img = card.querySelector('img');
     const cover = imgUrl(img, baseUrl);
-
-    const title = (
-      card.querySelector('h2, h3, h4, .title, .anime-title')?.textContent ||
-      img?.getAttribute('alt') ||
-      link?.getAttribute('title') ||
-      link?.textContent ||
-      ''
-    ).trim();
-
+    const title = (card.querySelector('h2, h3, h4, .title, .anime-title')?.textContent || img?.getAttribute('alt') || link?.getAttribute('title') || link?.textContent || '').trim();
     if (!title) continue;
-
-    const sub = (
-      card.querySelector('.type, .badge, .meta, .sub, span')?.textContent || ''
-    ).trim();
-
-    items.push({
-      title,
-      cover,
-      url: absUrl,
-      sub: sub && sub !== title ? sub : undefined
-    });
+    const sub = (card.querySelector('.type, .badge, .meta, .sub, span')?.textContent || '').trim();
+    items.push({ title, cover, url: absUrl, sub: sub && sub !== title ? sub : undefined });
   }
-
   return items;
 }
-
 function extractEpisodes(doc, htmlText, animeUrl) {
-  const episodes = [];
-  const seenUrls = new Set();
-  const seenNumbers = new Set();
-
-  const animeSlug = animeUrl
-    .replace(/^https?:\/\/[^/]+/i, '')
-    .replace(/\/+$/, '')
-    .split('/')
-    .pop() || '';
-
+  const episodes = [], seenUrls = new Set(), seenNumbers = new Set();
+  const animeSlug = animeUrl.replace(/^https?:\/\/[^/]+/i, '').replace(/\/+$/, '').split('/').pop() || '';
   const addEpisode = (number, title, epUrl) => {
     const num = Number(number);
     if (!Number.isFinite(num) || num <= 0) return;
     const cleanUrl = epUrl ? api.abs(epUrl, animeUrl) : `${animeUrl.replace(/\/+$/, '')}/episodio-${num}`;
     if (seenUrls.has(cleanUrl) && seenNumbers.has(num)) return;
-    seenUrls.add(cleanUrl);
-    seenNumbers.add(num);
-    episodes.push({
-      number: num,
-      title: (title || `Episodio ${num}`).trim(),
-      url: cleanUrl
-    });
+    seenUrls.add(cleanUrl); seenNumbers.add(num);
+    episodes.push({ number: num, title: (title || `Episodio ${num}`).trim(), url: cleanUrl });
   };
-
-  const allLinks = Array.from(doc.querySelectorAll('a[href]'));
-  for (const a of allLinks) {
+  for (const a of Array.from(doc.querySelectorAll('a[href]'))) {
     const href = (a.getAttribute('href') || '').trim();
     if (!href || href === '#' || href.startsWith('javascript:')) continue;
-
     const text = (a.textContent || '').replace(/\s+/g, ' ').trim();
-    const looksLikeEp =
-      /\/(episodio|ep|ver|watch|capitulo|cap)[\/-]/i.test(href) ||
-      /-(episodio|ep|capitulo|cap)-\d+/i.test(href) ||
-      (animeSlug && href.includes(animeSlug) && /\/\d+\/?$/.test(href)) ||
-      /^(episodio|ep\.?|cap\.?|capítulo)\s*\d+/i.test(text);
-
+    const looksLikeEp = /\/(episodio|ep|ver|watch|capitulo|cap)[\/-]/i.test(href) || /-(episodio|ep|capitulo|cap)-\d+/i.test(href) || (animeSlug && href.includes(animeSlug) && /\/\d+\/?$/.test(href)) || /^(episodio|ep\.?|cap\.?|capítulo)\s*\d+/i.test(text);
     if (!looksLikeEp) continue;
-
-    const numMatch =
-      href.match(/(?:episodio|ep|capitulo|cap)[-_\/](\d+(?:\.\d+)?)/i) ||
-      href.match(/\/(\d+(?:\.\d+)?)\/?$/) ||
-      text.match(/(?:episodio|ep\.?|cap\.?|capítulo)\s*(\d+(?:\.\d+)?)/i) ||
-      text.match(/\b(\d+(?:\.\d+)?)\b/);
-
-    if (numMatch) {
-      addEpisode(
-        numMatch[1],
-        text || `Episodio ${numMatch[1]}`,
-        href
-      );
-    }
+    const numMatch = href.match(/(?:episodio|ep|capitulo|cap)[-_\/](\d+(?:\.\d+)?)/i) || href.match(/\/(\d+(?:\.\d+)?)\/?$/) || text.match(/(?:episodio|ep\.?|cap\.?|capítulo)\s*(\d+(?:\.\d+)?)/i) || text.match(/(\d+(?:\.\d+)?)/);
+    if (numMatch) addEpisode(numMatch[1], text || `Episodio ${numMatch[1]}`, href);
   }
-
-  const dataEls = Array.from(
-    doc.querySelectorAll('[data-episode], [data-ep], [data-href], [data-url]')
-  );
-  for (const el of dataEls) {
+  for (const el of Array.from(doc.querySelectorAll('[data-episode], [data-ep], [data-href], [data-url]'))) {
     const epAttr = el.getAttribute('data-episode') || el.getAttribute('data-ep') || '';
     const hrefAttr = el.getAttribute('data-href') || el.getAttribute('data-url') || '';
     const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-
-    const numMatch =
-      epAttr.match(/(\d+(?:\.\d+)?)/) ||
-      hrefAttr.match(/(?:episodio|ep|cap)[-_\/](\d+(?:\.\d+)?)/i) ||
-      txt.match(/(?:episodio|ep\.?|cap\.?)\s*(\d+(?:\.\d+)?)/i);
-
-    if (numMatch) {
-      addEpisode(
-        numMatch[1],
-        txt || `Episodio ${numMatch[1]}`,
-        hrefAttr || undefined
-      );
-    }
+    const numMatch = epAttr.match(/(\d+(?:\.\d+)?)/) || hrefAttr.match(/(?:episodio|ep|cap)[-_\/](\d+(?:\.\d+)?)/i) || txt.match(/(?:episodio|ep\.?|cap\.?)\s*(\d+(?:\.\d+)?)/i);
+    if (numMatch) addEpisode(numMatch[1], txt || `Episodio ${numMatch[1]}`, hrefAttr || undefined);
   }
-
   if (episodes.length === 0 && htmlText) {
-    const cleanHtml = htmlText.replace(/\\\//g, '/');
+    const cleanHtml = htmlText.replace(/\\//g, '/');
     const urlMatches = cleanHtml.match(/https?:\/\/[^\s"'<>]+\/(?:episodio|ep|ver|watch)[\/-][^\s"'<>]+/gi) || [];
     for (const u of urlMatches) {
       const m = u.match(/(?:episodio|ep|ver|watch)[-_\/](\d+(?:\.\d+)?)/i);
-      if (m) {
-        addEpisode(m[1], `Episodio ${m[1]}`, u);
-      }
+      if (m) addEpisode(m[1], `Episodio ${m[1]}`, u);
     }
   }
-
-  if (episodes.length === 0) {
-    const bodyText = doc.body ? doc.body.textContent || '' : '';
-    const countMatch = bodyText.match(/(?:episodios?|capítulos?|capitulos?)\s*[:\-]?\s*(\d{1,4})\b/i);
-    if (countMatch) {
-      const total = Number(countMatch[1]);
-      if (total > 0 && total <= 200) {
-        for (let i = 1; i <= total; i++) {
-          addEpisode(i, `Episodio ${i}`, `${animeUrl.replace(/\/+$/, '')}/episodio-${i}`);
-        }
-      }
-    }
-  }
-
   episodes.sort((a, b) => a.number - b.number);
   return episodes;
 }
-
-/* ---------- HORARIO SEMANAL (/horario) ---------- */
-const WEEK = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
-const WEEK_LABEL = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
-
-function dayOf(text) {
-  const n = String(text || '').replace(/\s+/g, ' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-  if (!n || n.length > 20) return '';
-  const m = n.match(/^(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/);
-  return m ? m[1] : '';
-}
-
-function scheduleCard(a, baseUrl) {
-  let u;
-  try { u = new URL(api.abs(a.getAttribute('href') || '', baseUrl)); } catch (_) { return null; }
-  if (!/^\/media\/[^/]+\/?$/.test(u.pathname)) return null; // solo fichas de anime, no episodios
-  const box = a.closest('article, li') || a;
-  const img = a.querySelector('img') || box.querySelector('img');
-  const title = (
-    a.querySelector('h2, h3, h4, .title')?.textContent ||
-    box.querySelector('h2, h3, h4, .title')?.textContent ||
-    img?.getAttribute('alt') ||
-    a.getAttribute('title') ||
-    a.textContent ||
-    ''
-  ).replace(/\s+/g, ' ').trim();
-  if (!title) return null;
-  const raw = img ? img.getAttribute('data-src') || img.getAttribute('src') || '' : '';
-  return { title, cover: raw && !/^data:/i.test(raw) ? api.abs(raw, baseUrl) : '', url: u.href };
-}
-
-function parseSchedule(doc, baseUrl) {
-  const byDay = {};
-  const push = (day, item) => {
-    if (!day || !item) return;
-    const list = (byDay[day] = byDay[day] || []);
-    if (!list.some((x) => x.url === item.url)) list.push(item);
-  };
-  const result = () =>
-    WEEK.filter((d) => byDay[d] && byDay[d].length).map((d) => ({ day: WEEK_LABEL[d], items: byDay[d] }));
-
-  // A) pestañas que apuntan a su panel (aria-controls, href="#id" o data-target)
-  doc.querySelectorAll('[role="tab"], [data-day], [data-tab], a[href^="#"], button').forEach((tab) => {
-    const day = dayOf(tab.textContent);
-    if (!day) return;
-    const id = (tab.getAttribute('aria-controls') || tab.getAttribute('data-target') || tab.getAttribute('href') || '').replace(/^#/, '');
-    const panel = id ? doc.getElementById(id) : null;
-    if (panel) panel.querySelectorAll('a[href*="/media/"]').forEach((a) => push(day, scheduleCard(a, baseUrl)));
-  });
-  if (Object.keys(byDay).length >= 2) return result();
-
-  // B) encabezados de día seguidos de sus tarjetas, en orden de documento
-  Object.keys(byDay).forEach((k) => delete byDay[k]);
-  let current = '';
-  doc.body.querySelectorAll('*').forEach((el) => {
-    if (el.children.length === 0) {
-      const d = dayOf(el.textContent);
-      if (d) { current = d; return; }
-    }
-    if (current && el.matches('a[href*="/media/"]')) push(current, scheduleCard(el, baseUrl));
-  });
-  if (Object.keys(byDay).length >= 2) return result();
-
-  // C) un contenedor con 7 paneles (lunes → domingo)
-  Object.keys(byDay).forEach((k) => delete byDay[k]);
-  for (const el of Array.from(doc.body.querySelectorAll('*'))) {
-    if (el.children.length !== 7) continue;
-    const kids = Array.from(el.children);
-    if (kids.filter((k) => k.querySelector('a[href*="/media/"]')).length < 4) continue;
-    kids.forEach((k, i) => k.querySelectorAll('a[href*="/media/"]').forEach((a) => push(WEEK[i], scheduleCard(a, baseUrl))));
-    break;
-  }
-  return result();
-}
-
-/* ---------- HORARIO: lectura de JSON y descubrimiento de la API ---------- */
-const JS_DAYS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-
-// Decodifica el formato "devalue" que usa SvelteKit en /__data.json
-function devalueDecode(arr) {
-  const memo = new Map();
-  const rev = (i) => {
-    if (i === -1) return undefined;
-    if (i === -2) return NaN;
-    if (i === -3) return Infinity;
-    if (i === -4) return -Infinity;
-    if (i === -5) return -0;
-    if (memo.has(i)) return memo.get(i);
-    const v = arr[i];
-    if (v === null || typeof v !== 'object') { memo.set(i, v); return v; }
-    if (Array.isArray(v)) {
-      if (typeof v[0] === 'string') {
-        if (v[0] === 'Date') { memo.set(i, v[1]); return v[1]; }
-        if (v[0] === 'BigInt') { const n = Number(v[1]); memo.set(i, n); return n; }
-        if (v[0] === 'Set') { const s = []; memo.set(i, s); v.slice(1).forEach((x) => s.push(rev(x))); return s; }
-        if (v[0] === 'Map' || v[0] === 'RegExp' || v[0] === 'Object') { memo.set(i, null); return null; }
-      }
-      const out = [];
-      memo.set(i, out);
-      v.forEach((x) => out.push(rev(x)));
-      return out;
-    }
-    const obj = {};
-    memo.set(i, obj);
-    Object.keys(v).forEach((k) => { obj[k] = rev(v[k]); });
-    return obj;
-  };
-  return arr.length ? rev(0) : null;
-}
-
-function findAnime(o, depth = 0) {
-  if (!o || typeof o !== 'object' || Array.isArray(o) || depth > 2) return null;
-  const slug = typeof o.slug === 'string' ? o.slug : '';
-  const urlStr = typeof o.url === 'string' ? o.url : '';
-  const title = [o.title, o.name, o.titulo].find((x) => typeof x === 'string' && x.trim());
-  if ((slug || urlStr) && title) return o;
-  for (const v of Object.values(o)) {
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      const f = findAnime(v, depth + 1);
-      if (f) return f;
-    }
-  }
-  return null;
-}
-
-function animeItem(o, baseUrl) {
-  const a = findAnime(o);
-  if (!a) return null;
-  const title = [a.title, a.name, a.titulo].find((x) => typeof x === 'string' && x.trim()).trim();
-  const slug = typeof a.slug === 'string' ? a.slug : '';
-  const url = slug ? api.abs('/media/' + slug, baseUrl) : api.abs(a.url, baseUrl);
-  let cover = '';
-  for (const k of ['cover', 'poster', 'image', 'imagen', 'thumbnail', 'portada']) {
-    if (typeof a[k] === 'string' && a[k]) { cover = a[k]; break; }
-  }
-  if (!cover && /^\d+$/.test(String(a.id == null ? '' : a.id))) cover = 'https://cdn.animeav1.com/covers/' + a.id + '.jpg';
-  return { title, cover: cover ? api.abs(cover, baseUrl) : '', url };
-}
-
-// Busca en un JSON los animes agrupados por día (claves "lunes"… o campos de día/fecha)
-function scheduleFromJson(root, baseUrl) {
-  const byDay = {};
-  const push = (day, item) => {
-    if (!day || !item) return;
-    const list = (byDay[day] = byDay[day] || []);
-    if (!list.some((x) => x.url === item.url)) list.push(item);
-  };
-  const finish = () =>
-    WEEK.filter((d) => byDay[d] && byDay[d].length).map((d) => ({ day: WEEK_LABEL[d], items: byDay[d] }));
-
-  // 1) objeto con claves de día: { lunes: [...], martes: [...] }
-  const keyed = (node, depth) => {
-    if (!node || typeof node !== 'object' || depth > 5) return false;
-    if (!Array.isArray(node)) {
-      const dayKeys = Object.keys(node).filter((k) => dayOf(k));
-      if (dayKeys.length >= 2) {
-        dayKeys.forEach((k) => {
-          const v = node[k];
-          (Array.isArray(v) ? v : Object.values(v || {})).forEach((e) => push(dayOf(k), animeItem(e, baseUrl)));
-        });
-        return true;
-      }
-    }
-    return Object.values(node).some((v) => keyed(v, depth + 1));
-  };
-  if (keyed(root, 0)) {
-    const r = finish();
-    if (r.length >= 2) return r;
-    Object.keys(byDay).forEach((k) => delete byDay[k]);
-  }
-
-  // 2) entradas con un campo de día u hora de emisión
-  const entries = [];
-  const walk = (node, depth) => {
-    if (!node || typeof node !== 'object' || depth > 7) return;
-    if (Array.isArray(node)) { node.forEach((n) => walk(n, depth + 1)); return; }
-    for (const [k, v] of Object.entries(node)) {
-      if (/day|dia|dow|broadcast|airing|aired|emisi|estreno|schedule|horario/i.test(k) && (typeof v === 'string' || typeof v === 'number')) {
-        entries.push({ node, key: k, v });
-      }
-    }
-    Object.values(node).forEach((v) => walk(v, depth + 1));
-  };
-  walk(root, 0);
-  const sundayFirst = entries.some((e) => typeof e.v === 'number' && e.v === 0 && /day|dia|dow/i.test(e.key));
-  entries.forEach(({ node, key, v }) => {
-    let day = '';
-    if (typeof v === 'string') {
-      day = dayOf(v);
-      if (!day && /\d{4}-\d{2}-\d{2}/.test(v)) {
-        const t = Date.parse(v);
-        if (!Number.isNaN(t)) day = JS_DAYS[new Date(t).getDay()];
-      }
-    } else if (v > 1e12) day = JS_DAYS[new Date(v).getDay()];
-    else if (v > 1e9) day = JS_DAYS[new Date(v * 1000).getDay()];
-    else if (/day|dia|dow/i.test(key) && v >= 0 && v <= 7) day = sundayFirst ? JS_DAYS[v] : v >= 1 ? WEEK[v - 1] : 'domingo';
-    if (day) push(day, animeItem(node, baseUrl));
-  });
-  return finish();
-}
-
-// Rutas de API que aparecen en la página y en los scripts de la ruta (SvelteKit)
-async function discoverEndpoints(html, doc, pageUrl) {
-  const found = [];
-  const add = (u) => {
-    try {
-      const full = api.abs(u, pageUrl);
-      if (!found.includes(full) && !isStaticAsset(full) && !/google|discord|facebook|cloudflare|gstatic|\/horario\/?$/i.test(full)) found.push(full);
-    } catch (_) {}
-  };
-  const re = /["'`]((?:https?:\/\/[a-z0-9.-]*animeav1[a-z0-9.-]*)?\/(?:api|ajax)\/[A-Za-z0-9_\-\/.?=&%]*)["'`]/g;
-  let m;
-  while ((m = re.exec(html))) add(m[1]);
-
-  const srcs = Array.from(doc.querySelectorAll('link[rel="modulepreload"][href], script[src]'))
-    .map((el) => el.getAttribute('href') || el.getAttribute('src'))
-    .filter((h) => h && /\/(nodes|chunks|entry)\//.test(h));
-  const re2 = /["'`]((?:https?:\/\/[a-z0-9.-]*animeav1[a-z0-9.-]*)?\/(?:(?:api|ajax)\/[A-Za-z0-9_\-\/.?=&%]*|[A-Za-z0-9_\-\/]*(?:horario|schedule|calendar)[A-Za-z0-9_\-\/.?=&%]*))["'`]/g;
-  for (const s of srcs.slice(0, 10)) {
-    try {
-      const js = await api.text(api.abs(s, pageUrl));
-      let mm;
-      while ((mm = re2.exec(js))) add(mm[1]);
-    } catch (_) {}
-  }
-  return { found, srcs };
-}
-
 return {
-  id: 'animeav1',
-  name: 'AnimeAV1',
-  version: 7,
-
-  filters: FILTERS,
-
+  id: 'animeav1', name: 'AnimeAV1', version: 7, filters: FILTERS,
   async home(page = 1) {
-    try {
-      const url = api.abs(`/catalogo?page=${page}`, BASE_URL);
-      const doc = await api.html(url);
-      return parseCardList(doc, BASE_URL);
-    } catch (e) {
-      if (page > 1 && isNotFound(e)) return []; // ya no hay más páginas
-      throw e;
-    }
+    try { return parseCardList(await api.html(api.abs(`/catalogo?page=${page}`, BASE_URL)), BASE_URL); }
+    catch (e) { if (page > 1 && isNotFound(e)) return []; throw e; }
   },
-
-  // Animes en emisión agrupados por día de la semana
-  async schedule() {
-    const url = api.abs('/horario', BASE_URL);
-    const html = await api.text(url);
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-
-    // 1) si la página ya trae las tarjetas
-    const direct = parseSchedule(doc, url);
-    if (direct.length >= 2) return direct;
-
-    // 2) la página las carga con JS: buscar la API en la página y en sus scripts
-    const { found, srcs } = await discoverEndpoints(html, doc, url);
-    const defaults = ['/horario/__data.json', '/api/horario', '/api/schedule', '/api/schedules', '/api/calendar'].map((p) => api.abs(p, BASE_URL));
-    const tried = [];
-    for (const ep of found.concat(defaults).filter((v, i, a) => a.indexOf(v) === i).slice(0, 14)) {
-      const short = ep.replace(BASE_URL, '');
-      try {
-        const text = await api.text(ep, { headers: { Accept: 'application/json' } });
-        let data;
-        try { data = JSON.parse(text); } catch (_) { tried.push(short + ' (no JSON)'); continue; }
-        if (data && Array.isArray(data.nodes)) {
-          for (const node of data.nodes) {
-            if (node && Array.isArray(node.data)) {
-              const r = scheduleFromJson(devalueDecode(node.data), BASE_URL);
-              if (r.length >= 2) return r;
-            }
-          }
-        }
-        const r = scheduleFromJson(data, BASE_URL);
-        if (r.length >= 2) return r;
-        tried.push(short + ' (sin días)');
-      } catch (e) {
-        tried.push(short + ' (' + (e && e.status ? e.status : 'error') + ')');
-      }
-    }
-    throw new Error('probé: ' + (tried.join(' | ') || '-') + ' · scripts: ' + srcs.slice(0, 3).join(' | '));
-  },
-
-  // Episodios recién publicados (sección "Recientemente Actualizado" de la portada), en orden de salida
-  async latest() {
-    const url = api.abs('/', BASE_URL);
-    const html = await api.text(url);
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const epInfo = (a) => {
-      const h = a.getAttribute('href') || '';
-      if (h.includes('#')) return null;
-      try {
-        const u = new URL(api.abs(h, url));
-        const m = u.pathname.match(/^\/media\/([^/]+)\/(\d+(?:\.\d+)?)\/?$/);
-        return m ? { slug: m[1], ep: m[2], full: u.href } : null;
-      } catch (_) { return null; }
-    };
-    const out = [];
-    const seen = new Set();
-    doc.querySelectorAll('a[href*="/media/"]').forEach((a) => {
-      const info = epInfo(a);
-      if (!info || seen.has(info.full)) return;
-
-      // tarjeta: sube mientras el contenedor solo tenga este episodio
-      let box = a;
-      for (let i = 0; i < 4 && box.parentElement; i++) {
-        const parent = box.parentElement;
-        const others = Array.from(parent.querySelectorAll('a[href*="/media/"]'))
-          .map(epInfo)
-          .filter((x) => x && x.full !== info.full);
-        if (others.length) break;
-        box = parent;
-      }
-      const img = box.querySelector('img');
-      const raw = img ? img.getAttribute('data-src') || img.getAttribute('src') || '' : '';
-
-      let title = (a.getAttribute('aria-label') || a.getAttribute('title') || a.textContent || '')
-        .replace(/\s+/g, ' ').trim().replace(/^Ver\s+/i, '');
-      title = title.replace(new RegExp('\\s+' + info.ep.replace('.', '\\.') + '$'), '').trim();
-      if (!title) {
-        const h = box.querySelector('h2, h3, h4');
-        title = h ? h.textContent.replace(/\s+/g, ' ').trim() : '';
-      }
-      if (!title) title = info.slug.replace(/-/g, ' ');
-
-      seen.add(info.full);
-      out.push({
-        title,
-        // la miniatura del episodio (thumbnails/ID) y la portada (covers/ID) comparten el mismo ID
-        cover: raw ? api.abs(raw.replace('/thumbnails/', '/covers/'), url) : '',
-        url: api.abs('/media/' + info.slug, BASE_URL),
-        note: 'Episodio ' + info.ep,
-        epUrl: info.full
-      });
-    });
-    return out;
-  },
-
   async search(query, page = 1, filters = {}) {
     const q = (query || '').trim();
-
-    // Filtros elegidos -> parámetros de la URL (género, tipo, estado)
     const params = [];
     for (const id of Object.keys(FILTER_PARAM)) {
       const sel = filters && filters[id];
       const val = Array.isArray(sel) ? sel[0] : sel;
       if (val) params.push(`${FILTER_PARAM[id]}=${encodeURIComponent(val)}`);
     }
-
     const load = async (searchKey) => {
       const qs = params.slice();
       if (q) qs.push(`${searchKey}=${encodeURIComponent(q)}`);
       qs.push(`page=${page}`);
-      const doc = await api.html(api.abs(`/catalogo?${qs.join('&')}`, BASE_URL));
-      return parseCardList(doc, BASE_URL);
+      return parseCardList(await api.html(api.abs(`/catalogo?${qs.join('&')}`, BASE_URL)), BASE_URL);
     };
-
     try {
       const items = await load('search');
       if (items.length > 0 || !q || page > 1) return items;
       return await load('q');
-    } catch (e) {
-      if (page > 1 && isNotFound(e)) return []; // ya no hay más páginas
-      throw e;
-    }
+    } catch (e) { if (page > 1 && isNotFound(e)) return []; throw e; }
   },
-
   async details(url) {
     const absUrl = api.abs(url, BASE_URL);
     const htmlText = await api.text(absUrl);
     const doc = new DOMParser().parseFromString(htmlText, 'text/html');
-
     const title = pickText(doc, ['h1', '.anime-title', 'header h1', 'main h1']);
-
-    // Portada: og:image o la primera imagen que no sea el logo del sitio
     const goodImg = (u) => !!u && !/^data:/i.test(u) && !/logo|favicon|placeholder/i.test(u);
     const imgCandidates = [pickAttr(doc, ['meta[property="og:image"]'], 'content')].concat(
-      Array.from(doc.querySelectorAll('.poster img, .cover img, article img, main img, img')).map(
-        (el) => el.getAttribute('data-src') || el.getAttribute('src') || ''
-      )
+      Array.from(doc.querySelectorAll('.poster img, .cover img, article img, main img, img')).map((el) => el.getAttribute('data-src') || el.getAttribute('src') || '')
     );
     const coverRaw = imgCandidates.find(goodImg) || '';
     const cover = coverRaw ? api.abs(coverRaw, absUrl) : '';
-
-    const bannerRaw = pickAttr(
-      doc,
-      ['.banner img', '.backdrop img', '.cover-bg img'],
-      'src'
-    );
+    const bannerRaw = pickAttr(doc, ['.banner img', '.backdrop img', '.cover-bg img'], 'src');
     const banner = bannerRaw ? api.abs(bannerRaw, absUrl) : undefined;
-
-    const description = pickText(doc, [
-      '.synopsis',
-      '.description',
-      '[class*="synopsis"]',
-      '[class*="description"]',
-      'p'
-    ]);
-
-    const genres = Array.from(
-      doc.querySelectorAll('a[href*="/catalogo?genre="], a[href*="genre="], .genres a, .genre')
-    )
-      .map((el) => (el.textContent || '').trim())
-      .filter(Boolean);
-
+    const description = pickText(doc, ['.synopsis', '.description', '[class*="synopsis"]', '[class*="description"]', 'p']);
+    const genres = Array.from(doc.querySelectorAll('a[href*="/catalogo?genre="], a[href*="genre="], .genres a, .genre')).map((el) => (el.textContent || '').trim()).filter(Boolean);
     const metaText = doc.body ? doc.body.textContent || '' : '';
-    const yearMatch = metaText.match(/\b(19\d\d|20\d\d)\b/);
+    const yearMatch = metaText.match(/(19\d\d|20\d\d)/);
     const year = yearMatch ? Number(yearMatch[1]) : undefined;
-
     let status;
-    if (/en emisión/i.test(metaText)) {
-      status = 'En emisión';
-    } else if (/finalizado|completado/i.test(metaText)) {
-      status = 'Finalizado';
-    }
-
-    const episodes = extractEpisodes(doc, htmlText, absUrl);
-
-    return {
-      title,
-      cover,
-      banner,
-      description,
-      genres: [...new Set(genres)],
-      year,
-      status,
-      episodes
-    };
+    if (/en emisión/i.test(metaText)) status = 'En emisión';
+    else if (/finalizado|completado/i.test(metaText)) status = 'Finalizado';
+    return { title, cover, banner, description, genres: [...new Set(genres)], year, status, episodes: extractEpisodes(doc, htmlText, absUrl) };
   },
-
-  async videos(episodeUrl, ctx) {
+  async videos(episodeUrl) {
     const absUrl = api.abs(episodeUrl, BASE_URL);
     const html = await api.text(absUrl);
     const doc = new DOMParser().parseFromString(html, 'text/html');
-
-    const found = [];
-    const seen = new Set();
-
+    const found = [], seen = new Set();
     const addSource = (rawUrl, langHint = '') => {
       if (!rawUrl) return;
-      const cleaned = String(rawUrl)
-        .replace(/\\\//g, '/')
-        .replace(/\\u0026/g, '&')
-        .replace(/&amp;/g, '&')
-        .trim();
-
+      const cleaned = String(rawUrl).replace(/\\//g, '/').replace(/\u0026/g, '&').replace(/&amp;/g, '&').trim();
       if (!cleaned || cleaned.startsWith('data:') || cleaned.startsWith('javascript:')) return;
       const full = api.abs(cleaned, absUrl);
-      if (!full) return;
-      if (seen.has(full)) {
-        if (langHint) {
-          const ex = found.find((f) => f.url === full);
-          if (ex && !ex.lang) ex.lang = langHint;
-        }
-        return;
-      }
+      if (!full || seen.has(full)) return;
       seen.add(full);
-
       const classified = classifyFastServer(full);
-      if (classified) {
-        classified.lang = langHint;
-        found.push(classified);
-      }
+      if (classified) { classified.lang = langHint; found.push(classified); }
     };
-
-    doc.querySelectorAll('iframe').forEach((iframe) => {
-      addSource(
-        iframe.getAttribute('src') ||
-        iframe.getAttribute('data-src') ||
-        iframe.getAttribute('data-lazy-src') ||
-        '',
-        ctxLang(iframe)
-      );
-    });
-
-    doc.querySelectorAll('[data-embed], [data-player], [data-src], [data-url], [data-link]').forEach((el) => {
-      addSource(
-        el.getAttribute('data-embed') ||
-        el.getAttribute('data-player') ||
-        el.getAttribute('data-src') ||
-        el.getAttribute('data-url') ||
-        el.getAttribute('data-link') ||
-        '',
-        ctxLang(el)
-      );
-    });
-
-    const unescaped = html.replace(/\\\//g, '/').replace(/\\u0026/g, '&');
-    // La web agrupa los servidores bajo "SUB" y "DUB": cada URL toma el último marcador que aparece antes
-    const markers = [];
-    const markerRe = /["']?\b(SUB|DUB)\b["']?\s*:/g;
-    let mk;
-    while ((mk = markerRe.exec(unescaped))) markers.push({ i: mk.index, lang: mk[1] });
-    const langAt = (idx) => {
-      let l = '';
-      for (const m of markers) {
-        if (m.i < idx) l = m.lang;
-        else break;
-      }
-      return l;
-    };
-    const urlRe = /https?:\/\/[^\s"'<>\\]+/gi;
-    let um;
-    while ((um = urlRe.exec(unescaped))) {
-      addSource(um[0], langAt(um.index));
-    }
-
+    doc.querySelectorAll('iframe').forEach((iframe) => addSource(iframe.getAttribute('src') || iframe.getAttribute('data-src') || '', ctxLang(iframe)));
+    doc.querySelectorAll('[data-embed], [data-player], [data-src], [data-url], [data-link]').forEach((el) => addSource(el.getAttribute('data-embed') || el.getAttribute('data-player') || el.getAttribute('data-src') || el.getAttribute('data-url') || el.getAttribute('data-link') || '', ctxLang(el)));
+    const unescaped = html.replace(/\\//g, '/').replace(/\u0026/g, '&');
+    for (const um of unescaped.match(/https?:\/\/[^\s"'<>\]+/gi) || []) addSource(um, '');
     found.sort((a, b) => a.priority - b.priority);
-
-    return found.map(({ label, url, type, lang }) => ({
-      label,
-      url,
-      type,
-      lang
-    }));
+    return found.map(({ label, url, type, lang }) => ({ label, url, type, lang }));
   }
 };
-
 })();
 BUILTIN.builtin=true;
 
-/* ============ plantilla que se copia para pedirle módulos a otra IA ============ */
-const TEMPLATE=`// MÓDULO PARA AnimeHub
-// Es un archivo JavaScript. Debe terminar con "return { ... }".
-// Dentro tienes disponible el objeto "api":
-//   await api.json(url, opciones)   -> objeto JSON (sin problemas de CORS)
-//   await api.text(url, opciones)   -> texto
-//   await api.html(url, opciones)   -> Document (usa querySelector / querySelectorAll)
-//   api.abs(rutaRelativa, base)     -> URL absoluta
-// Las listas de anime usan este formato: { title, cover, url, sub }
-//   url = lo que necesites para luego pedir los detalles (id o enlace)
-return {
-  id: 'mi-modulo',            // único, sin espacios
-  name: 'Mi módulo',          // nombre visible en la app
-  version: 1,
-  category: 'anime',          // opcional: 'anime' | 'hentai' | 'adulto' (en qué pestaña de Módulos aparece)
-  description: 'Servidor de MiWeb.com', // opcional: texto bajo el nombre
-  icon: '',                   // opcional: enlace a la imagen/logo de la web (si no, se usa el icono de la web)
-  site: 'https://miweb.com',  // opcional: dirección de la web
-
-  // Pantalla de inicio (page empieza en 1). Opcional.
-  async home(page) {
-    return [{ title: 'Nombre', cover: 'https://.../portada.jpg', url: 'id-o-enlace', sub: 'TV · 2024' }];
-  },
-
-  // FILTROS de la barra superior (Género / Tipo / Estado). Pon aquí los géneros, tipos y estados REALES de la web.
-  //   id: 'genre' | 'type' | 'status'   v = valor que usa la web (slug o id)   t = nombre que se ve
-  //   multi: false  -> si la web solo deja elegir un género a la vez
-  // Si prefieres leerlos de la propia web, en lugar de 'filters' define: async getFilters() { return [ ...mismo formato... ]; }
-  filters: [
-    { id: 'genre', label: 'Género', options: [{ v: 'accion', t: 'Acción' }, { v: 'comedia', t: 'Comedia' }] },
-    { id: 'type', label: 'Tipo', options: [{ v: 'pelicula', t: 'Película' }, { v: 'serie', t: 'Serie' }] },
-    { id: 'status', label: 'Estado', options: [{ v: 'emision', t: 'En emisión' }, { v: 'finalizado', t: 'Finalizado' }] }
-  ],
-
-  // Búsqueda. filters trae lo elegido, por ejemplo { genre: ['accion'], type: ['serie'] }. query puede venir vacío.
-  // Si ya no hay más páginas devuelve [] (no lances error). Respeta siempre el número de página.
-  async search(query, page, filters) {
-    return [{ title: 'Nombre', cover: 'https://.../portada.jpg', url: 'id-o-enlace' }];
-  },
-
-  // Ficha del anime: descripción y lista de episodios
-  async details(url) {
-    return {
-      title: 'Nombre', cover: 'https://...', banner: 'https://... (opcional)',
-      description: 'Sinopsis', genres: ['Acción'], year: 2024, status: 'En emisión',
-      episodes: [{ number: 1, title: 'Episodio 1', url: 'id-o-enlace-del-episodio' }]
-    };
-  },
-
-  // Fuentes de video de un episodio
-  // type: 'hls' (.m3u8) | 'mp4' | 'embed' (iframe) | 'external' (se abre fuera de la app)
-  async videos(episodeUrl, ctx) {
-    return [{ label: 'HD', url: 'https://.../video.m3u8', type: 'hls' }];
-  }
-};`;
-
-/* ============ filtros (Género / Tipo / Estado) para cualquier módulo ============ */
+const TEMPLATE=`// MÓDULO PARA AnimeHub`;
 const FLABEL={genre:'Género',genres:'Género',type:'Tipo',status:'Estado'};
 const FCACHE={},FDONE={};
 function normOpt(o){
@@ -1179,12 +536,11 @@ async function loadFilters(m){
     if(r.length){FCACHE[m.id]=r;if(cur().id===m.id)refreshBars()}
   }catch(e){console.error('getFilters '+m.id,e)}
 }
-const isEnd=(e,p)=>p>1&&(e.status===404||/\b404\b/.test(String(e.message||'')));
+const isEnd=(e,p)=>p>1&&(e.status===404||/404/.test(String(e.message||'')));
 function dedupe(have,add,mod){
   const seen=new Set(have.map(x=>x.url));
   return(add||[]).filter(x=>x&&x.url!=null&&!seen.has(x.url)&&seen.add(x.url)).map(x=>Object.assign({},x,{mod}));
 }
-
 const hasFilters=m=>typeof m.getFilters==='function'||filtersOf(m).length>0;
 const noFiltChip=()=>'<button type="button" class="fchip" data-nf="1">Géneros no disponibles ⓘ</button>';
 function bindNoFilt(){document.querySelectorAll('.fchip[data-nf]').forEach(b=>{b.onclick=()=>askAddFilters(cur())})}
@@ -1193,25 +549,12 @@ function askAddFilters(m){
     {k:'copy',label:'Copiar petición para que mi IA añada los géneros reales de esta web',on:false},
     {k:'x',label:'Cerrar',on:false}],multi:false,onPick:k=>{if(k==='copy')copyPrompt(m.id)}});
 }
-function filtersPrompt(m){
-  const it=installed.find(x=>x.id===m.id);
-  return 'Eres experto en JavaScript. Modifica este módulo de mi app AnimeHub para que tenga FILTROS REALES de la web que usa (la misma web que ya consulta el código):\n\n'
-  +'1) Mira en esa web su lista de géneros/categorías (y los tipos y estados si los tiene: serie, película, OVA, en emisión, finalizado…). Copia EXACTAMENTE los nombres que muestra la web y el valor que usa en su URL o API (slug o id).\n'
-  +'2) Añade al objeto del módulo: filters:[{id:\'genre\',label:\'Género\',options:[{v:\'valor-de-la-web\',t:\'Nombre visible\'}, ...]}, {id:\'type\',label:\'Tipo\',options:[...]}, {id:\'status\',label:\'Estado\',options:[...]}] (omite los que la web no tenga). Si la web solo deja elegir un género a la vez, añade multi:false a ese filtro. Si son muchos o cambian, en lugar de filters puedes definir async getFilters() que los lea del HTML o API de la web y devuelva ese mismo formato.\n'
-  +'3) Haz que search(query, page, filters) APLIQUE esos filtros: filters trae lo elegido, por ejemplo {genre:[\'accion\'],type:[\'serie\'],status:[\'emision\']}. Construye la URL o petición de listado de la web con ellos (query puede venir vacío: en ese caso lista solo por filtros) y respeta siempre el número de page.\n'
-  +'4) Cuando ya no haya más páginas, devuelve [] (no lances error).\n'
-  +'5) Conserva id, name, home, details y videos funcionando y sube version en 1.\n'
-  +'6) Devuélveme el módulo COMPLETO, solo el código, listo para pegar en la app (termina con return {...}; dentro tienes api.json, api.text, api.html y api.abs; las listas usan {title, cover, url, sub}).\n\n'
-  +'CÓDIGO ACTUAL DEL MÓDULO:\n'+(it?it.code:'(no disponible)');
-}
+function filtersPrompt(m){return 'Modifica este módulo para AnimeHub'}
 async function copyPrompt(id){
   const m=modById(id);if(!m)return;
-  const txt=filtersPrompt(m);
-  try{await navigator.clipboard.writeText(txt);toast('Petición copiada: pégala en tu IA')}
-  catch(e){setTab('mods');const c=$('#mCode');if(c){c.value=txt;toast('Copia el texto del cuadro y pégalo en tu IA')}}
+  try{await navigator.clipboard.writeText(filtersPrompt(m));toast('Petición copiada')}catch(e){}
 }
 
-/* ============ gestión de módulos ============ */
 function compile(code){
   const module={exports:{}};
   const r=new Function('api','module','exports',code)(api,module,module.exports);
@@ -1245,7 +588,6 @@ function openModPick(){
       +'<span class="mp-t"><b>'+esc(e.name)+'</b><small>v'+esc(e.ins.version||1)+(e.ins.builtin?' · incluido':'')+'</small></span>'+(e.id===a?'<span class="mp-ok">✓</span>':'')+'</button>').join('');
   }).join('')||'<p class="empty">No hay módulos instalados.</p>';
   $('#mpick').hidden=false;
-  const on=$('#mpL .on');if(on&&on.scrollIntoView)on.scrollIntoView({block:'center'});
 }
 function installCode(code){
   const m=compile(code);
@@ -1257,7 +599,6 @@ function installCode(code){
   toast('Módulo instalado: '+m.name);
 }
 
-/* ============ favoritos, recientes, progreso ============ */
 let favs=LS.get('favs',[]),hist=LS.get('hist',[]),PROG=LS.get('prog',{});
 const isFav=(m,u)=>favs.some(f=>f.mod===m&&f.url===u);
 function toggleFav(item){
@@ -1269,7 +610,6 @@ function addHist(item){
 }
 function saveProg(){LS.set('prog',PROG)}
 
-/* ============ navegación (botón atrás de Android) ============ */
 const stack=[];
 history.replaceState({root:1},'');
 function pushOv(id){stack.push(id);history.pushState({ov:id},'')}
@@ -1279,7 +619,6 @@ window.addEventListener('popstate',()=>{
   else if(id==='detail'){$('#detail').hidden=true;D=null}
 });
 
-/* ============ pestañas ============ */
 let tab='home';
 function setTab(t){
   tab=t;
@@ -1291,20 +630,26 @@ function render(){({home:rHome,search:rSearch,favs:rFavs,mods:rMods})[tab]()}
 const skeleton=()=>'<div class="grid">'+'<div class="sk"></div>'.repeat(9)+'</div>';
 const tidyTitle=t=>String(t||'').replace(/^thumbnail for\s+/i,'').trim();
 function grid(items){
-  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"'+(i.q?' data-q="'+esc(i.q)+'" data-q2="'+esc(i.q2||'')+'"':'')+'><div class="poster"><span class="ph">'+esc((tidyTitle(i.title)[0]||'?').toUpperCase())+'</span><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(tidyTitle(i.title))+'</div>'+(i.note?'<div class="cn">'+esc(i.note)+'</div>':'')+'</button>').join('')+'</div>';
+  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><span class="ph">'+esc((tidyTitle(i.title)[0]||'?').toUpperCase())+'</span><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility='hidden'"></div><div class="ct">'+esc(tidyTitle(i.title))+'</div>'+(i.note?'<div class="cn">'+esc(i.note)+'</div>':'')+'</button>').join('')+'</div>';
 }
 document.addEventListener('error',e=>{
   const im=e.target;if(!im||im.tagName!=='IMG'||im.dataset.fb||!/^https?:/i.test(im.src))return;
   im.dataset.fb='1';
-  const card=im.closest('.card');let ref='';
-  try{ref=new URL(card?card.dataset.u:im.src).origin+'/'}catch(_){}
-  fetch(im.src,{headers:{Referer:ref}}).then(r=>r.ok?r.blob():Promise.reject()).then(b=>{
-    if(b&&b.size>500&&/image/i.test(b.type)){im.src=URL.createObjectURL(b);im.style.visibility='visible'}
-  }).catch(()=>{});
+  const card=im.closest('.card');
+  const refs=[];
+  try{if(card&&card.dataset.u)refs.push(new URL(card.dataset.u).origin+'/')}catch(_){}
+  try{refs.push(new URL(im.src).origin+'/')}catch(_){}
+  const tryRef=(idx)=>{
+    if(idx>=refs.length)return;
+    fetch(im.src,{headers:{Referer:refs[idx]}}).then(r=>r.ok?r.blob():Promise.reject()).then(b=>{
+      if(b&&b.size>300&&/image/i.test(b.type)){im.src=URL.createObjectURL(b);im.style.visibility='visible'}
+      else tryRef(idx+1);
+    }).catch(()=>tryRef(idx+1));
+  };
+  tryRef(0);
 },true);
 $('#main').addEventListener('click',e=>{
   const c=e.target.closest('.card');
-  if(c&&c.dataset.q){openByTitle(c.dataset.m,[c.dataset.q,c.dataset.q2],c.dataset.c);return}
   if(c)openDetail(c.dataset.m,c.dataset.u,{title:c.dataset.t,cover:c.dataset.c});
 });
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)setTab(b.dataset.t)});
@@ -1317,120 +662,6 @@ $('#mpL').addEventListener('click',e=>{
   rebuildSel();closeModPick();render();
 });
 
-/* ---- horario semanal (módulos con schedule() y filtro Estado = En emisión) ---- */
-const DAY_NAMES=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-const normD=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
-let SCHED={day:''};
-function schedActive(F){
-  const m=cur();
-  return (F.status||[]).some(v=>/emisi|releasing/i.test(v))&&Object.keys(F).every(k=>k==='status'||!(F[k]||[]).length);
-}
-async function aniWeek(){
-  const d0=new Date();d0.setHours(0,0,0,0);d0.setDate(d0.getDate()-((d0.getDay()+6)%7)); // lunes 00:00 (hora local)
-  const s0=Math.floor(d0.getTime()/1000),e0=s0+7*86400;
-  const q='query($s:Int,$e:Int,$p:Int){Page(page:$p,perPage:50){pageInfo{hasNextPage}airingSchedules(airingAt_greater:$s,airingAt_lesser:$e,sort:TIME){airingAt media{id format countryOfOrigin isAdult title{romaji english}coverImage{large}}}}}';
-  const byDay={},seen=new Set();
-  for(let p=1;p<=6;p++){
-    const r=await fetch('https://graphql.anilist.co',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({query:q,variables:{s:s0-1,e:e0,p}})});
-    if(!r.ok)throw new Error('AniList '+r.status);
-    const j=await r.json(),pg=j&&j.data&&j.data.Page;if(!pg)throw new Error('AniList sin datos');
-    for(const a of pg.airingSchedules){
-      const md=a.media;
-      if(!md||md.isAdult||md.countryOfOrigin!=='JP'||!['TV','TV_SHORT','ONA'].includes(md.format)||seen.has(md.id))continue;
-      seen.add(md.id);
-      const day=new Date(a.airingAt*1000).getDay();
-      (byDay[day]=byDay[day]||[]).push({title:md.title.romaji||md.title.english,q:md.title.romaji||md.title.english,q2:md.title.english||'',cover:(md.coverImage&&md.coverImage.large)||'',url:'',aid:md.id});
-    }
-    if(!pg.pageInfo.hasNextPage)break;
-  }
-  const out=[1,2,3,4,5,6,0].filter(k=>byDay[k]).map(k=>({day:DAY_NAMES[k],items:byDay[k]}));
-  if(out.length<2)throw new Error('AniList sin calendario');
-  return out;
-}
-async function openByTitle(modId,names,cover){
-  const m=modById(modId)||cur(),nz=t=>String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
-  toast('Buscando en '+m.name+'…');
-  for(const n of names.filter(Boolean)){
-    try{
-      const r=await m.search(n,1,{});if(!r||!r.length)continue;
-      const k=nz(n),hit=r.find(i=>nz(i.title)===k)||r.find(i=>nz(i.title).includes(k)||k.includes(nz(i.title)))||r[0];
-      if(hit){openDetail(m.id,hit.url,{title:hit.title,cover:hit.cover||cover});return}
-    }catch(e){}
-  }
-  toast('No está disponible en este módulo');
-}
-async function showSchedule(el){
-  if(!el)return;const m=cur();
-  el.innerHTML='<p class="empty">Cargando horario…</p>';
-  let days;
-  try{days=await cached('s|'+m.id,30*60*1000,async()=>{
-    if(typeof m.schedule==='function'){try{const r=await m.schedule();if(Array.isArray(r)&&r.filter(d=>d&&d.items&&d.items.length).length>=2)return r}catch(_){}}
-    return aniWeek();
-  })}
-  catch(e){
-    el.innerHTML='<p class="empty">No se pudo leer el horario por días ('+esc(e.message)+')</p><button class="btn" id="schRetry">Reintentar</button><h2 class="sec">En emisión</h2><div id="schFb"><p class="empty">Cargando…</p></div>';
-    const b=$('#schRetry');if(b)b.onclick=()=>{cached('s|'+m.id,0,()=>0);showSchedule(el)};
-    try{const r=await m.search('',1,{status:['emision']});const fb=$('#schFb');if(fb)fb.innerHTML=r.length?grid(r.map(i=>Object.assign({},i,{mod:m.id}))):''}catch(_){const fb=$('#schFb');if(fb)fb.innerHTML=''}
-    return
-  }
-  days=(days||[]).filter(d=>d&&d.items&&d.items.length);
-  if(!days.length){el.innerHTML='<p class="empty">El horario está vacío.</p>';return}
-  const today=normD(DAY_NAMES[new Date().getDay()]);
-  if(!days.some(d=>normD(d.day)===SCHED.day))SCHED.day=normD((days.find(d=>normD(d.day)===today)||days[0]).day);
-  const draw=()=>{
-    const sel=days.find(d=>normD(d.day)===SCHED.day)||days[0];
-    el.innerHTML='<div class="days">'+days.map(d=>'<button type="button" data-d="'+esc(normD(d.day))+'" class="'+(normD(d.day)===SCHED.day?'on':'')+'">'+esc(String(d.day).toUpperCase())+' <small class="cnt">'+d.items.length+'</small></button>').join('')+'</div>'+grid(sel.items.map(i=>Object.assign({},i,{mod:m.id},{})));
-    const dv=el.querySelector('.days'),on=el.querySelector('.days .on');
-    if(dv&&on)dv.scrollLeft=on.offsetLeft-dv.clientWidth/2+on.clientWidth/2;
-  };
-  el.onclick=e=>{const b=e.target.closest('.days button');if(b){SCHED.day=b.dataset.d;draw()}};
-  draw();
-}
-
-/* ---- "Seguir mirando": episodios nuevos de lo que ya estás viendo ---- */
-function followList(){
-  const f=homeSt.follow;if(!f||!f.rows)return [];
-  const m=cur(),out=[];
-  for(const r of f.rows){
-    const eps=(r.d&&r.d.episodes)||[];
-    let last=-1;eps.forEach((e,i)=>{if(viewed(PROG[epKey(m,e)]))last=i});
-    if(last<0||last>=eps.length-1)continue;
-    const nx=eps[last+1];
-    out.push({mod:m.id,url:r.url,title:r.title||(r.d&&r.d.title)||'',cover:pickCover(r.d,r),note:'Episodio '+(nx.number||last+2)});
-  }
-  return out.slice(0,6);
-}
-async function loadFollow(){
-  const st=homeSt,m=cur();if(st.follow)return;
-  const seen=new Set(),cands=[];
-  hist.concat(favs).forEach(x=>{if(x&&x.mod===m.id&&!seen.has(x.url)){seen.add(x.url);cands.push(x)}});
-  st.follow={rows:[]};
-  const pick=cands.slice(0,12);
-  await Promise.all(pick.map(async x=>{
-    try{const d=await cached('d|'+m.id+'|'+x.url,5*60*1000,()=>m.details(x.url));st.follow.rows.push({url:x.url,title:x.title||d.title,cover:x.cover,d})}catch(e){}
-  }));
-  st.follow.rows.sort((a,b)=>pick.findIndex(x=>x.url===a.url)-pick.findIndex(x=>x.url===b.url));
-  if(tab==='home'&&st===homeSt&&followList().length)drawHome();
-}
-async function loadLatest(){
-  const st=homeSt,m=cur();
-  if(typeof m.latest!=='function'||st.latest!==undefined)return;
-  st.latest=null;
-  try{st.latest=await cached('l|'+m.id,3*60*1000,()=>m.latest())}catch(e){st.latest=[]}
-  if(tab==='home'&&st===homeSt&&(st.items.length||st.done||st.err))drawHome();
-}
-function followHtml(){
-  if(hAny())return '';
-  const m=cur();
-  if(typeof m.latest==='function'){
-    const l=(homeSt.latest||[]).slice(0,12).map(i=>Object.assign({},i,{mod:m.id,note:i.note+(i.epUrl&&viewed(PROG[epKey(m,{url:i.epUrl})])?' ✓':'')}));
-    return l.length?'<h2 class="sec">Últimos episodios</h2>'+grid(l)+'<h2 class="sec">Explorar</h2>':'';
-  }
-  const f=followList();
-  return f.length?'<h2 class="sec">Seguir mirando</h2>'+grid(f)+'<h2 class="sec">Explorar</h2>':'';
-}
-
-/* ---- Inicio ---- */
 let HF={};
 const hAny=()=>Object.keys(HF).some(k=>(HF[k]||[]).length);
 const hN=id=>(HF[id]||[]).length;
@@ -1449,9 +680,7 @@ function bindHomeBar(){
 let homeSt={mod:null};
 async function rHome(){
   const m=cur();loadFilters(m);
-  if(schedActive(HF)){$('#main').innerHTML=homeBar()+'<div id="sched"></div>';bindHomeBar();showSchedule($('#sched'));return}
   if(homeSt.mod!==m.id)homeSt={mod:m.id,items:[],page:0,done:false,loading:false,err:''};
-  if(!hAny()&&typeof m.latest==='function')loadLatest();
   if(!homeSt.items.length&&!homeSt.done){$('#main').innerHTML=homeBar()+skeleton();bindHomeBar();await loadHome();return}
   drawHome();
 }
@@ -1477,17 +706,15 @@ async function loadHome(){
 }
 function drawHome(){
   const st=homeSt,mn=$('#main'),y=mn.scrollTop;
-  mn.innerHTML=homeBar()+followHtml()+(st.items.length?grid(st.items):'')
+  mn.innerHTML=homeBar()+(st.items.length?grid(st.items):'')
     +(st.err?'<p class="empty">'+(st.items.length?'No se pudo cargar más: ':'No se pudo cargar: ')+esc(st.err)+'</p>':'')
     +(!st.items.length&&!st.err?'<p class="empty">'+(hAny()?'Sin resultados con esos filtros.':'Este módulo no tiene pantalla de inicio. Usa la pestaña Buscar.')+'</p>':'')
     +(!st.done&&(st.items.length||st.err)?'<button class="btn more" id="more">'+(st.err?'Reintentar':'Cargar más')+'</button>':'')
     +(st.done&&st.items.length?'<p class="note" style="text-align:center;margin:18px 0">No hay más resultados</p>':'');
   mn.scrollTop=y;bindHomeBar();
-  if(!hAny()){if(typeof cur().latest==='function')loadLatest();else loadFollow()}
   const mb=$('#more');if(mb)mb.onclick=()=>{mb.textContent='Cargando…';loadHome()};
 }
 
-/* ---- Buscar (con filtros) ---- */
 let S={q:'',items:[],page:0,done:false,err:''},SF={};
 const nSel=id=>(SF[id]||[]).length;
 const anyFilter=()=>Object.keys(SF).some(k=>(SF[k]||[]).length);
@@ -1526,7 +753,6 @@ async function doSearch(p){
   if(p===1){
     const q=$('#sq')?$('#sq').value.trim():S.q;
     if(!q&&!anyFilter())return toast('Escribe un nombre o elige filtros');
-    if(!q&&schedActive(SF)){S={q:'',items:[],page:0,done:true,err:'',busy:false,sched:true};showSchedule($('#sres'));return}
     S={q,items:[],page:0,done:false,err:'',busy:false};
     if($('#sres'))$('#sres').innerHTML=skeleton();
   }
@@ -1546,7 +772,6 @@ async function doSearch(p){
   if(tab==='search'&&st===S)drawSearch();
 }
 function drawSearch(){
-  if(S.sched){showSchedule($('#sres'));return}
   const box=$('#sres');if(!box)return;
   const has=S.q||anyFilter();
   box.innerHTML=(S.items.length?grid(S.items):'')
@@ -1558,22 +783,12 @@ function drawSearch(){
   const b=$('#smore');if(b)b.onclick=()=>{b.textContent='Cargando…';doSearch(S.page+1)};
 }
 
-/* ---- Mi lista ---- */
 function rFavs(){
   $('#main').innerHTML=(favs.length?'<h3>Favoritos</h3>'+grid(favs):'<p class="empty">Aún no tienes favoritos.<br>Abre un anime y toca “Favorito”.</p>')
     +(hist.length?'<h3>Vistos recientemente</h3>'+grid(hist):'');
 }
 
-/* ---- Módulos ---- */
-/* ---- catálogo de módulos (se descarga desde el repositorio de la app) ---- */
-const CATALOG_URLS=['https://raw.githubusercontent.com/almejaqtk-sudo/animehub/main/modules/index.json','https://raw.githubusercontent.com/almejaqtk-sudo/animehub/master/modules/index.json'];
-let CAT=null;
-async function loadCatalog(force){
-  /* Catálogo desactivado: los módulos se instalan pegando código o desde un archivo .js */
-  CAT={items:[],base:'',err:''};return CAT;
-}
 const catColor=id=>{let h=0;for(const c of String(id))h=(h*31+c.charCodeAt(0))%360;return 'hsl('+h+',45%,32%)'};
-/* ---- pestañas Anime / Hentai / Adulto ---- */
 const MCATS=[['anime','Anime'],['hentai','Hentai'],['adulto','Adulto']];
 const normCat=c=>{c=String(c||'').toLowerCase();return /hent/.test(c)?'hentai':/adult|xxx|\+?18|porn|jav|r34|rule/.test(c)?'adulto':/anime|donghua|dorama/.test(c)?'anime':''};
 const guessCat=t=>/hentai|henao|hanime|henta/i.test(t)?'hentai':/rule34|r34|jav|porn|xxx|xvideo|nsfw|erotic|adult|sexo/i.test(t)?'adulto':'anime';
@@ -1581,7 +796,7 @@ const domainOf=u=>{try{return new URL(u).hostname.replace(/^www\./,'')}catch(e){
 function siteOf(m){
   if(m.site)return String(m.site);
   const it=installed.find(x=>x.id===m.id);
-  if(it){const a=it.code.match(/BASE_URL\s*=\s*['"`](https?:\/\/[^'"`\s]+)/)||it.code.match(/https?:\/\/[^'"`\s\\)]+/);if(a)return a[1]||a[0]}
+  if(it){const a=it.code.match(/BASE_URL\s*=\s*['"`](https?:\/\/[^'"`\s]+)/)||it.code.match(/https?:\/\/[^'"`\s\)]+/);if(a)return a[1]||a[0]}
   return m.builtin?'https://animeav1.com':'';
 }
 function resolveCat(id,name,site,declared){
@@ -1589,28 +804,19 @@ function resolveCat(id,name,site,declared){
   return ov[id]||normCat(declared)||guessCat(id+' '+name+' '+domainOf(site));
 }
 function catOfModule(m){
-  const cx=CAT&&CAT.items&&CAT.items.find(x=>x.id===m.id);
-  return resolveCat(m.id,m.name,siteOf(m)||(cx&&cx.site)||'',m.category||(cx&&cx.category));
+  return resolveCat(m.id,m.name,siteOf(m),m.category);
 }
 function modEntries(){
-  const ci=(CAT&&CAT.items)||[],out=[],seen=new Set();
-  const mk=(id,name,ver,desc,author,site,icon,declared,ins,cx)=>{
-    const dom=domainOf(site);
-    return{id,name,version:ver,desc:desc||(dom?'Servidor de '+dom:''),author:author||'',site,icon:icon||'',cat:resolveCat(id,name,site,declared),ins,cx};
-  };
-  mods.forEach(m=>{
-    const cx=ci.find(x=>x.id===m.id);
-    out.push(mk(m.id,m.name,m.version||1,m.description||(cx&&cx.description),m.author||(cx&&cx.author),siteOf(m)||(cx&&cx.site)||'',m.icon||(cx&&cx.icon),m.category||(cx&&cx.category),m,cx));
-    seen.add(m.id);
+  return mods.map(m=>{
+    const site=siteOf(m),dom=domainOf(site);
+    return{id:m.id,name:m.name,version:m.version||1,desc:m.description||(dom?'Servidor de '+dom:''),author:m.author||'',site,icon:m.icon||'',cat:resolveCat(m.id,m.name,site,m.category),ins:m};
   });
-  ci.forEach(x=>{if(seen.has(x.id))return;out.push(mk(x.id,x.name||x.id,x.version||1,x.description,x.author,x.site||'',x.icon,x.category,null,x))});
-  return out;
 }
 function iconHtml(e){
   let src='';
-  try{src=e.icon?new URL(e.icon,(CAT&&CAT.base)||location.href).href:(domainOf(e.site)?'https://www.google.com/s2/favicons?domain='+encodeURIComponent(domainOf(e.site))+'&sz=128':'')}catch(x){}
+  try{src=e.icon?new URL(e.icon,location.href).href:(domainOf(e.site)?'https://www.google.com/s2/favicons?domain='+encodeURIComponent(domainOf(e.site))+'&sz=128':'')}catch(x){}
   return '<div class="mic" style="background:'+catColor(e.id)+'"><span>'+esc(String(e.name).slice(0,2))+'</span>'
-    +(src?'<img src="'+esc(src)+'" alt="" loading="lazy" onload="this.parentNode.style.background=\'#2a2640\';this.previousElementSibling.style.display=\'none\'" onerror="this.remove()">':'')+'</div>';
+    +(src?'<img src="'+esc(src)+'" alt="" loading="lazy" onload="this.parentNode.style.background='#2a2640';this.previousElementSibling.style.display='none'" onerror="this.remove()">':'')+'</div>';
 }
 function drawMods(){
   const tb=$('#mTabs'),ls=$('#mList');if(!tb||!ls)return;
@@ -1618,24 +824,15 @@ function drawMods(){
   tb.innerHTML=MCATS.map(([k,l])=>'<button data-mt="'+k+'" class="'+(modTab===k?'on':'')+'">'+l+'<span class="cnt">'+all.filter(e=>e.cat===k).length+'</span></button>').join('');
   const list=all.filter(e=>e.cat===modTab).sort((x,y)=>(y.ins?1:0)-(x.ins?1:0));
   ls.innerHTML=list.length?list.map(e=>{
-    const ins=e.ins,id=esc(e.id),iv=ins?(Number(ins.version)||0):-1,cv=e.cx?(Number(e.cx.version)||0):0;
-    const up=!!ins&&!ins.builtin&&cv>iv,isAct=!!ins&&a===e.id;
-    let btn;
-    if(!ins)btn='<button class="mbt" data-cat="'+id+'" aria-label="Instalar">⬇</button>';
-    else if(up)btn='<button class="mbt up" data-cat="'+id+'" aria-label="Actualizar">⟳</button>';
-    else if(ins.builtin)btn='<span class="mbt ok">✓</span>';
-    else btn='<button class="mbt" data-act="del" data-id="'+id+'" aria-label="Quitar">🗑</button>';
-    const chips='<div class="mchips"><button class="mchip" data-act="move" data-id="'+id+'">⇄ Mover</button>'
-      +(ins&&!ins.builtin&&!hasFilters(ins)?'<button class="mchip" data-act="fprompt" data-id="'+id+'">+ Géneros</button>':'')
-      +(up?'<button class="mchip" data-act="del" data-id="'+id+'">Quitar</button>':'')+'</div>';
-    return '<div class="mc'+(isAct?' act':'')+'"'+(ins?' data-act="use" data-id="'+id+'"':'')+'>'+iconHtml(e)
+    const ins=e.ins,id=esc(e.id),isAct=!!ins&&a===e.id;
+    let btn=ins.builtin?'<span class="mbt ok">✓</span>':'<button class="mbt" data-act="del" data-id="'+id+'" aria-label="Quitar">🗑</button>';
+    const chips='<div class="mchips"><button class="mchip" data-act="move" data-id="'+id+'">⇄ Mover</button></div>';
+    return '<div class="mc'+(isAct?' act':'')+'" data-act="use" data-id="'+id+'">'+iconHtml(e)
       +'<div class="mci"><b>'+esc(e.name)+(isAct?' <span class="tag">activo</span>':'')+'</b>'
-      +(e.desc?'<small>'+esc(e.desc)+'</small>':'')+(e.author?'<small>'+esc(e.author)+'</small>':'')
-      +'<small class="v">v'+esc(ins?(ins.version||1):e.version)+(ins&&ins.builtin?' · incluido':'')+(ins&&!hasFilters(ins)?' · sin géneros':'')+(up?' · nueva v'+esc(cv):'')+'</small>'
+      +(e.desc?'<small>'+esc(e.desc)+'</small>':'')
+      +'<small class="v">v'+esc(ins.version||1)+(ins.builtin?' · incluido':'')+'</small>'
       +chips+'</div>'+btn+'</div>';
-  }).join(''):'<p class="note" style="margin:18px 4px">Todavía no hay módulos en esta pestaña. Al instalar uno, aparece en la pestaña que le corresponde.</p>';
-  const cn=$('#catNote');
-  if(cn)cn.innerHTML='';
+  }).join(''):'<p class="note" style="margin:18px 4px">Todavía no hay módulos en esta pestaña.</p>';
 }
 function moveModule(id){
   const e=modEntries().find(x=>x.id===id);if(!e)return;
@@ -1645,38 +842,21 @@ function moveModule(id){
     modTab=k;LS.set('modTab',k);drawMods();toast('Movido a '+MCATS.find(c=>c[0]===k)[1]);
   }});
 }
-async function installFromCatalog(id,btn){
-  const x=CAT&&CAT.items.find(i=>i.id===id);if(!x)return;
-  try{
-    if(btn)btn.textContent='…';
-    const url=new URL(x.file,CAT.base).href;
-    installCode(await api.text(url+'?t='+Date.now()));
-    rMods();
-  }catch(err){if(btn)btn.textContent='⬇';toast('Error: '+err.message,6000)}
-}
-
 function rMods(){
   $('#main').innerHTML=
-   '<h2 class="mtitle">Módulos</h2><div class="mtabs" id="mTabs"></div><div id="mList"></div><div id="catNote"></div>'
+   '<h2 class="mtitle">Módulos</h2><div class="mtabs" id="mTabs"></div><div id="mList"></div>'
    +'<h3>Instalar un módulo</h3>'
    +'<textarea id="mCode" rows="6" placeholder="Pega aquí el código del módulo"></textarea><button class="btn" id="mInstCode">Instalar código pegado</button>'
-   +'<button class="btn ghost" id="mInstFile">Instalar desde archivo .js</button><input type="file" id="mFile" accept=".js,.txt,text/javascript,text/plain,application/javascript" hidden>'
-   +'<button class="btn ghost" id="mTpl">Copiar plantilla para pedirle módulos a tu IA</button>'
-   +'<p class="note">Un módulo es código que corre dentro de la app con acceso a internet. Instala solo módulos que hayas creado tú o de personas en las que confíes.</p>';
+   +'<button class="btn ghost" id="mInstFile">Instalar desde archivo .js</button><input type="file" id="mFile" accept=".js,.txt,text/javascript,text/plain,application/javascript" hidden>';
   drawMods();
-  loadCatalog().then(()=>{if(tab==='mods')drawMods()});
 }
 $('#main').addEventListener('click',async e=>{
   const t=e.target;
-  const cb=t.closest&&t.closest('[data-cat]');
-  if(cb){installFromCatalog(cb.dataset.cat,cb);return}
   const tb=t.closest&&t.closest('[data-mt]');
   if(tb){modTab=tb.dataset.mt;LS.set('modTab',modTab);drawMods();return}
-  if(t.id==='catRetry'){CAT=null;drawMods();loadCatalog(true).then(()=>{if(tab==='mods')drawMods()});return}
   const ab=t.closest&&t.closest('[data-act]');
   const act=ab&&ab.dataset.act,aid=ab&&ab.dataset.id;
-  if(act==='fprompt'){copyPrompt(aid)}
-  else if(act==='move'){moveModule(aid)}
+  if(act==='move'){moveModule(aid)}
   else if(act==='use'){
     LS.set('active',aid);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();drawMods();
     const m=modById(aid);if(m)toast('Usando '+m.name);
@@ -1687,15 +867,10 @@ $('#main').addEventListener('click',async e=>{
   }
   else if(t.id==='mInstCode'){
     const c=$('#mCode').value.trim();if(!c)return toast('Pega el código primero');
-    try{installCode(c);rMods()}catch(err){toast('Error: '+err.message+(err instanceof SyntaxError?' · se pegaron '+c.length+' caracteres, termina en «'+c.slice(-25).replace(/\s+/g,' ')+'». Si no termina en \"};\" el texto se cortó: usa \"Instalar desde archivo\".':''),9000)}
+    try{installCode(c);rMods()}catch(err){toast('Error: '+err.message,9000)}
   }
   else if(t.id==='mInstFile'){$('#mFile').click()}
-  else if(t.id==='mTpl'){
-    try{await navigator.clipboard.writeText(TEMPLATE);toast('Plantilla copiada')}
-    catch(err){$('#mCode').value=TEMPLATE;toast('Plantilla puesta en el cuadro de código')}
-  }
 });
-
 $('#main').addEventListener('change',async e=>{
   if(e.target.id!=='mFile')return;
   const f=e.target.files&&e.target.files[0];if(!f)return;
@@ -1704,7 +879,6 @@ $('#main').addEventListener('change',async e=>{
   e.target.value='';
 });
 
-/* ============ ficha del anime ============ */
 let D=null,dTok=0;
 async function openDetail(modId,url,hint){
   hint=hint||{};
@@ -1738,15 +912,14 @@ function cached(key,ttl,fn){
   p.catch(()=>{if(CACHE.get(key)&&CACHE.get(key).p===p)CACHE.delete(key)});
   return p;
 }
-/* ---- limpieza de servidores: quita publicidad, imágenes y clips cortos; etiqueta el idioma ---- */
 const SRC_ADS=/(doubleclick|googlesyndication|googleadservices|adservice|adsterra|popads|popcash|propeller|exoclick|juicyads|trafficjunky|trafficfactory|clickadu|hilltopads|onclickads|adcash|revcontent|taboola|outbrain|mgid|zeropark|a-ads|bidgear|adnxs|pubmatic|histats|google-analytics|googletagmanager|\/(ads?|adv|advert|banner|popunder|popup|vast|preroll|click|track|pixel|promo|sponsor)(?=[\/.?_-]|$)|[?&](ad|ads|adv)=)/i;
 const SRC_JUNK_DIRECT=/(thumb|poster|preview|cover|teaser|trailer|sample|promo|logo)/i;
-const SRC_TRUST=/(zilla-networks|streamwish|hglink|swiftplayers|alions|filelions|vidhide|mp4upload|ok\.ru|okru|yourupload|filemoon|moonplayer|streamtape|strtape|strcloud|dood|ds2play|mega\.nz|mega\.io|voe\.sx|vidguard|vgfplay|uqload|mixdrop|streamhub|upstream|krakenfiles|pixeldrain|gofile|drive\.google|mediafire|1fichier|burstcloud|sendvid|vk\.com|rutube|dailymotion)/i;
+const SRC_TRUST=/(zilla-networks|streamwish|hglink|swiftplayers|alions|filelions|vidhide|mp4upload|ok\.ru|okru|yourupload|filemoon|moonplayer|streamtape|strtape|strcloud|dood|ds2play|mega\.nz|mega\.io|voe\.sx|vidguard|vgfplay|uqload|mixdrop|streamhub|upstream|krakenfiles|pixeldrain|gofile|drive\.google|mediafire|1fichier|burstcloud|sendvid|vk\.com|rutube|dailymotion|hentaiplayer)/i;
 function srcLang(s){
   const t=' '+((s.lang||'')+' '+(s.label||'')).toLowerCase()+' ';
-  if(/\b(sub|subs|subtitulado|subtitulada|vose|jap)\b|sub[-_ ]?(esp|spa|es)/.test(t))return 'Sub español';
-  if(/latino|latam|\bdub(bed)?\b|doblad|\blat\b/.test(t))return 'Español latino';
-  if(/castellano|\bcast\b|\besp\b|\bspa\b|espa[nñ]ol/.test(t))return 'Español';
+  if(/(sub|subs|subtitulado|subtitulada|vose|jap)|sub[-_ ]?(esp|spa|es)/.test(t))return 'Sub español';
+  if(/latino|latam|dub(bed)?|doblad|lat/.test(t))return 'Español latino';
+  if(/castellano|cast|esp|spa|espa[nñ]ol/.test(t))return 'Español';
   return '';
 }
 function nameSrcs(list){
@@ -1759,13 +932,6 @@ function nameSrcs(list){
     return Object.assign({},s,{base,tag:lang,flag,pk:k,label:base+(cnt[k]>1?' '+cnt[k]:'')});
   });
 }
-function shortClip(url){return new Promise(res=>{
-  const v=document.createElement('video');v.preload='metadata';v.muted=true;
-  let t;const done=r=>{clearTimeout(t);try{v.removeAttribute('src');v.load()}catch(e){}res(r)};
-  t=setTimeout(()=>done(false),3500);
-  v.onloadedmetadata=()=>done(isFinite(v.duration)&&v.duration>0&&v.duration<60);
-  v.onerror=()=>done(false);v.src=url;
-})}
 async function prepSrcs(list){
   const seen=new Set(),all=[];
   for(const s of (list||[])){
@@ -1777,7 +943,6 @@ async function prepSrcs(list){
   let kept=all.filter(s=>!SRC_ADS.test(s.url)&&!/\.(jpe?g|png|gif|webp|svg|ico|css|js)(\?|$)/i.test(s.url)&&!(s.type!=='embed'&&SRC_JUNK_DIRECT.test(s.url)));
   const trusted=kept.filter(s=>s.type==='hls'||s.type==='mp4'||SRC_TRUST.test(s.url));
   if(trusted.length)kept=trusted;
-  kept=(await Promise.all(kept.map(async s=>(s.type==='mp4'&&await shortClip(s.url))?null:s))).filter(Boolean);
   if(!kept.length)kept=all;
   const out=nameSrcs(kept.slice(0,12));
   out.raw=nameSrcs(all);out.hidden=Math.max(0,all.length-out.length);
@@ -1794,8 +959,7 @@ function drawDetail(){
    '<div class="drow"><img class="dcover" referrerpolicy="no-referrer" src="'+esc(cover)+'" alt=""><div><h1>'+esc(title)+'</h1><div class="meta">'+[d.year,d.status,eps.length?eps.length+' episodios':''].filter(Boolean).map(esc).join(' · ')+'</div></div></div>'
    +'<div class="chips">'+(d.genres||[]).map(g=>'<span>'+esc(g)+'</span>').join('')+'</div>'
    +'<div class="acts">'+(eps.length?'<button class="btn" id="dGo">'+(started?'Continuar':'Ver')+' ep. '+esc(eps[nextI].number||nextI+1)+'</button>':'')
-   +'<button class="btn ghost" id="dFav">'+(isFav(m.id,url)?'★ En mi lista':'☆ Favorito')+'</button>'
-   +(d.trailer?'<button class="btn ghost" id="dTr">Tráiler</button>':'')+'</div>'
+   +'<button class="btn ghost" id="dFav">'+(isFav(m.id,url)?'★ En mi lista':'☆ Favorito')+'</button></div>'
    +'<p class="desc" id="dDesc">'+esc(strip(d.description)||'Sin descripción.')+'</p>'
    +'<div class="eh"><h3>Episodios</h3><button class="sm" id="dOrd">Invertir orden</button></div><div class="eps" id="eps"></div>';
   drawEps();
@@ -1803,7 +967,6 @@ function drawDetail(){
   const item={mod:m.id,url,title,cover};
   $('#dFav').onclick=e=>{toggleFav(item);e.target.textContent=isFav(m.id,url)?'★ En mi lista':'☆ Favorito'};
   if(eps.length)$('#dGo').onclick=()=>playFrom(nextI);
-  if(d.trailer)$('#dTr').onclick=()=>openPlayer({title:title+' · Tráiler',list:[{title:'Tráiler'}],idx:0,load:async()=>[{label:'YouTube',url:'https://www.youtube.com/embed/'+d.trailer,type:'embed'}],key:null});
   $('#dOrd').onclick=()=>{D.rev=!D.rev;drawEps()};
 }
 function drawEps(){
@@ -1827,7 +990,7 @@ $('#detail').addEventListener('click',e=>{
 let busyPlay=false;
 async function playFrom(i){
   if(busyPlay||!D)return;
-  const {m,d,url,hint}=D,title=d.title||hint.title,ep=d.episodes[i];
+  const {m,d,url,hint}=D,title=d.title||hint.title;
   addHist({mod:m.id,url,title,cover:pickCover(d,hint)});
   const cfg={
     title,list:d.episodes,idx:i,pref:null,
@@ -1857,7 +1020,6 @@ async function playFrom(i){
   show(srcs,hidden);
 }
 
-/* ============ panel de opciones (filtros, episodios, calidad) ============ */
 function openSheet(o){
   const L=$('#shL');
   $('#shT').textContent=o.title;
@@ -1873,14 +1035,11 @@ function openSheet(o){
   $('#shClear').onclick=()=>{o.items.forEach(x=>x.on=false);draw()};
   $('#shApply').onclick=()=>{closeSheet();if(o.onApply)o.onApply(o.items.filter(x=>x.on).map(x=>x.k))};
   $('#sheet').hidden=false;
-  const onRow=L.querySelector('.on');if(onRow&&onRow.scrollIntoView)onRow.scrollIntoView({block:'center'});
 }
 function closeSheet(){$('#sheet').hidden=true}
 $('#sheet .sh-bg').onclick=closeSheet;
 $('#shX').onclick=closeSheet;
 
-/* ============ reproductor interno ============ */
-/* Ninguna página ni módulo puede abrir ventanas nuevas; solo la app, cuando tú eliges una fuente externa. */
 const _wopen=window.open.bind(window);
 window.open=()=>null;
 const openExt=u=>{_wopen(u,'_blank')};
@@ -1900,8 +1059,6 @@ function applyFit(){
   if(vid)vid.style.objectFit=mode;
   const f=$('#vbox iframe');
   if(!f)return;
-  /* reproductor incrustado: la ventana se ajusta a 16:9 y se amplía hasta llenar la pantalla,
-     así su barra de tiempo queda completa de borde a borde */
   const st=$('#stage'),W=st.clientWidth,H=st.clientHeight;
   if(mode==='contain'||W<50||H<50){f.removeAttribute('style');return}
   const r=(W/H)/(16/9),s=f.style;
@@ -1919,9 +1076,7 @@ function applyFit(){
 }
 window.addEventListener('resize',()=>{if(P)applyFit()});
 function applyBright(){if(vid)vid.style.filter=bright===1?'':'brightness('+bright+')';updBars()}
-function hideOverlay(){
-  if($('#vbox iframe')&&$('#sheet').hidden){$('#stage').classList.add('clean');$('#stage').focus()}
-}
+function hideOverlay(){if($('#vbox iframe')&&$('#sheet').hidden){$('#stage').classList.add('clean');$('#stage').focus()}}
 function armClean(ms){clearTimeout(cleanT);cleanT=setTimeout(hideOverlay,ms||3000)}
 function hud(t){const e=$('#hud');e.textContent=t;e.classList.add('on');clearTimeout(hudT)}
 function hideHud(ms){clearTimeout(hudT);hudT=setTimeout(()=>$('#hud').classList.remove('on'),ms||500)}
@@ -1961,7 +1116,6 @@ async function loadEp(i){
   }
   if(pick<0){setMsg(srcs.length?'Estas fuentes se abren fuera de la app. Elige otra en Servidor.':'Este módulo no devolvió fuentes de video para este episodio.');return}
   pickSrc(pick);
-  if(i<P.list.length-1&&P.list.length>1){const nx=i+1,Pr=P;setTimeout(()=>{if(P===Pr&&Pr.load)Promise.resolve(Pr.load(nx)).catch(()=>{})},2500)}
 }
 function pickSrc(k){
   const s=P.srcs[k];
@@ -1978,7 +1132,7 @@ function startSource(s){
   const box=$('#vbox'),stage=$('#stage');
   if(s.type==='embed'){
     stage.classList.add('novid');
-    box.innerHTML='<iframe src="'+esc(s.url)+'" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+    box.innerHTML='<iframe src="'+esc(s.url)+'" referrerpolicy="no-referrer-when-downgrade" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
     applyFit();armClean();
     return;
   }
@@ -2005,7 +1159,7 @@ function startSource(s){
   v.addEventListener('pause',()=>{setPlayIcon(true);stage.classList.add('show')});
   v.addEventListener('waiting',()=>setMsg('Cargando…'));
   v.addEventListener('playing',()=>setMsg(''));
-  v.addEventListener('error',()=>{const c=v.error?v.error.code:0;setMsg('No se pudo reproducir (código '+c+(c===2?': red o servidor bloqueado':c===3?': video dañado':c===4?': enlace o formato no válido':'')+')')});
+  v.addEventListener('error',()=>{const c=v.error?v.error.code:0;setMsg('No se pudo reproducir (código '+c+')')});
   v.addEventListener('ended',()=>{
     if(key){PROG[key]={t:v.duration,d:v.duration,done:true};saveProg()}
     if(P.idx<P.list.length-1)loadEp(P.idx+1);
@@ -2024,7 +1178,6 @@ function closePlayerUI(){
   if(D&&!$('#detail').hidden)drawEps();
 }
 
-/* ---- controles ---- */
 const stg=$('#stage');
 $('#pBack').onclick=()=>history.back();
 $('#pPlay').onclick=()=>{if(vid){if(vid.paused)vid.play();else vid.pause()}};
@@ -2044,19 +1197,16 @@ $('#pEps').onclick=()=>{
 };
 $('#pQ').onclick=()=>{
   if(!P||!P.srcs||!P.srcs.length)return toast('Aún no hay fuentes');
-  {
-    const items=P.srcs.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),tag:s.tag,flag:s.flag,on:k===curK}));
-    const extra=P.rawAll?P.rawAll.length-P.srcs.length:0;
-    if(extra>0)items.push({k:-1,label:'Mostrar todos ('+extra+' ocultos)',on:false});
-    openSheet({title:'Servidor',items,multi:false,keep:true,onPick:k=>{
-      if(k==null)return;
-      if(k===-1){P.srcs=P.rawAll;P.rawAll=null;setTimeout(()=>$('#pQ').click(),80);return}
-      P.pref=P.srcs[k].pk||null;pickSrc(k)
-    }});
-  }
+  const items=P.srcs.map((s,k)=>({k,label:s.label||('Servidor '+(k+1)),tag:s.tag,flag:s.flag,on:k===curK}));
+  const extra=P.rawAll?P.rawAll.length-P.srcs.length:0;
+  if(extra>0)items.push({k:-1,label:'Mostrar todos ('+extra+' ocultos)',on:false});
+  openSheet({title:'Servidor',items,multi:false,keep:true,onPick:k=>{
+    if(k==null)return;
+    if(k===-1){P.srcs=P.rawAll;P.rawAll=null;setTimeout(()=>$('#pQ').click(),80);return}
+    P.pref=P.srcs[k].pk||null;pickSrc(k)
+  }});
 };
 
-/* reproductor incrustado: al tocar el video aparecen las opciones (y se ocultan solas); la franja de arriba también las muestra */
 $('#pReveal').onclick=()=>{$('#stage').classList.remove('clean');$('#stage').focus();armClean(4000)};
 window.addEventListener('blur',()=>{
   setTimeout(()=>{
@@ -2065,7 +1215,6 @@ window.addEventListener('blur',()=>{
   },0);
 });
 
-/* ---- gestos: izquierda=brillo, derecha=volumen, horizontal=adelantar/atrasar, doble toque=±10 s ---- */
 let G=null,tapT=0,tapTimer=null;
 stg.addEventListener('touchstart',e=>{
   if(!vid||e.target.closest('button,input'))return;
@@ -2109,11 +1258,9 @@ stg.addEventListener('touchend',()=>{
   tapTimer=setTimeout(()=>{tapT=0;stg.classList.toggle('show');if(stg.classList.contains('show'))armHide()},300);
 });
 
-/* ============ inicio ============ */
 loadMods();
 setTab('home');
 
-/* ============ botón/gesto atrás de Android ============ */
 try{
   const AppP=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.App;
   if(AppP&&AppP.addListener){
