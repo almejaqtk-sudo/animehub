@@ -82,6 +82,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 .days{display:flex;overflow-x:auto;gap:4px;border-bottom:1px solid var(--card2);margin:6px 0 12px;scrollbar-width:none}
 .days::-webkit-scrollbar{display:none}
 .days button{flex:none;background:none;border:0;color:var(--mut);font-weight:700;letter-spacing:1px;padding:12px 14px;border-bottom:3px solid transparent}
+.days .cnt{font-size:11px;background:var(--card2);color:var(--tx);border-radius:99px;padding:2px 7px;margin-left:5px;letter-spacing:0}
 .days button.on{color:var(--ac);border-bottom-color:var(--ac)}
 .dhead .dhimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #player{z-index:20;background:#000;overflow:hidden;--pl:#b9c6ff}
@@ -1038,6 +1039,49 @@ return {
 })();
 BUILTIN.builtin=true;
 
+/* ============ módulo incluido: AniList (catálogo oficial, solo tráilers) ============ */
+const ANILIST=(function(){
+const ANI='https://graphql.anilist.co';
+async function aniQ(query,variables){
+  const r=await fetch(ANI,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({query,variables})});
+  const j=await r.json();if(j.errors)throw new Error(j.errors[0].message);return j.data;
+}
+const F='id title{romaji english} coverImage{extraLarge large} seasonYear format';
+const mapM=m=>({title:m.title.english||m.title.romaji,cover:m.coverImage.extraLarge||m.coverImage.large,url:String(m.id),sub:[m.format,m.seasonYear].filter(Boolean).join(' · ')});
+const GENRES=[['Action','Acción'],['tag:Martial Arts','Artes Marciales'],['tag:Cars','Autos'],['Adventure','Aventura'],['tag:School','Colegial'],['Comedy','Comedia'],['Slice of Life','Cosas de la vida'],['tag:Demons','Demonios'],['Drama','Drama'],['Fantasy','Fantasía'],['tag:Isekai','Isekai'],['Horror','Terror'],['Mahou Shoujo','Magia (Mahou Shoujo)'],['Mecha','Mecha'],['Music','Música'],['Mystery','Misterio'],['tag:Military','Militar'],['Psychological','Psicológico'],['Romance','Romance'],['Sci-Fi','Ciencia ficción'],['tag:Super Power','Superpoderes'],['Sports','Deportes'],['Supernatural','Sobrenatural'],['Thriller','Suspenso'],['tag:Vampire','Vampiros']].sort((a,b)=>a[1].localeCompare(b[1],'es'));
+const BUILTIN_FILTERS=[
+  {id:'genre',label:'Género',options:GENRES.map(g=>({v:g[0],t:g[1]}))},
+  {id:'type',label:'Tipo',options:[{v:'TV',t:'TV'},{v:'MOVIE',t:'Película'},{v:'OVA',t:'OVA'},{v:'ONA',t:'ONA'},{v:'SPECIAL',t:'Especial'}]},
+  {id:'status',label:'Estado',options:[{v:'RELEASING',t:'En emisión'},{v:'FINISHED',t:'Finalizado'},{v:'NOT_YET_RELEASED',t:'Próximamente'}]}
+];
+const M={
+  id:'anilist',name:'AniList (catálogo)',version:1,builtin:true,filters:BUILTIN_FILTERS,
+  async home(p){const d=await aniQ('query($p:Int){Page(page:$p,perPage:24){media(type:ANIME,sort:TRENDING_DESC,isAdult:false){'+F+'}}}',{p:p||1});return d.Page.media.map(mapM)},
+  async search(q,p,f){
+    f=f||{};const g=f.genre||[];
+    const genres=g.filter(x=>x.indexOf('tag:')!==0),tags=g.filter(x=>x.indexOf('tag:')===0).map(x=>x.slice(4));
+    const d=await aniQ('query($p:Int,$s:String,$g:[String],$t:[String],$f:[MediaFormat],$st:[MediaStatus],$so:[MediaSort]){Page(page:$p,perPage:24){media(type:ANIME,search:$s,genre_in:$g,tag_in:$t,format_in:$f,status_in:$st,sort:$so,isAdult:false){'+F+'}}}',
+      {p:p||1,s:q||null,g:genres.length?genres:null,t:tags.length?tags:null,f:(f.type&&f.type.length)?f.type:null,st:(f.status&&f.status.length)?f.status:null,so:[q?'SEARCH_MATCH':'POPULARITY_DESC']});
+    return d.Page.media.map(mapM);
+  },
+  async details(url){
+    const d=await aniQ('query($id:Int){Media(id:$id){id title{romaji english} coverImage{extraLarge} bannerImage description genres seasonYear status episodes nextAiringEpisode{episode} trailer{id site} streamingEpisodes{title thumbnail url site}}}',{id:+url});
+    const m=d.Media,se=m.streamingEpisodes||[];let eps;
+    if(se.length)eps=se.map((e,i)=>({number:i+1,title:e.title,url:e.url}));
+    else{const n=m.episodes||(m.nextAiringEpisode?m.nextAiringEpisode.episode-1:0);eps=Array.from({length:n},(_,i)=>({number:i+1,title:'Episodio '+(i+1),url:'ani:'+m.id+':'+(i+1)}))}
+    return{title:m.title.english||m.title.romaji,cover:m.coverImage.extraLarge,banner:m.bannerImage,description:m.description,genres:m.genres,year:m.seasonYear,status:m.status,episodes:eps,trailer:m.trailer&&m.trailer.site==='youtube'?m.trailer.id:null};
+  },
+  async videos(url,ctx){
+    const out=[];
+    if(/^https?:/.test(url))out.push({label:'Ver en la plataforma oficial',url,type:'external'});
+    if(ctx&&ctx.detail&&ctx.detail.trailer)out.push({label:'Tráiler',url:'https://www.youtube.com/embed/'+ctx.detail.trailer,type:'embed'});
+    return out;
+  }
+};
+return M;
+})();
+
+
 /* ============ plantilla que se copia para pedirle módulos a otra IA ============ */
 const TEMPLATE=`// MÓDULO PARA AnimeHub
 // Es un archivo JavaScript. Debe terminar con "return { ... }".
@@ -1170,14 +1214,15 @@ function compile(code){
   return m;
 }
 let installed=LS.get('mods',[]);
-let mods=[BUILTIN];
+let mods=[ANILIST,BUILTIN];
 function loadMods(){
-  mods=[BUILTIN];
-  installed.forEach(it=>{try{const m=compile(it.code);if(m.id!==BUILTIN.id)mods.push(m)}catch(e){console.error('Módulo '+it.id,e)}});
+  mods=[ANILIST,BUILTIN];
+  installed.forEach(it=>{try{const m=compile(it.code);if(m.id!==BUILTIN.id&&m.id!==ANILIST.id)mods.push(m)}catch(e){console.error('Módulo '+it.id,e)}});
   rebuildSel();
 }
 const modById=id=>mods.find(m=>m.id===id);
-const cur=()=>modById(LS.get('active','animeav1'))||BUILTIN;
+if(!LS.get('activeV2')){LS.set('active','anilist');LS.set('activeV2',1)}
+const cur=()=>modById(LS.get('active','anilist'))||ANILIST;
 function rebuildSel(){
   const a=cur().id;
   $('#modSel').innerHTML=mods.map(m=>'<option value="'+esc(m.id)+'"'+(m.id===a?' selected':'')+'>'+esc(m.name)+'</option>').join('');
@@ -1192,7 +1237,6 @@ function installCode(code){
 
 /* ============ favoritos, recientes, progreso ============ */
 let favs=LS.get('favs',[]),hist=LS.get('hist',[]),PROG=LS.get('prog',{});
-favs=favs.filter(f=>f.mod!=='anilist');hist=hist.filter(h=>h.mod!=='anilist');LS.set('favs',favs);LS.set('hist',hist);
 const isFav=(m,u)=>favs.some(f=>f.mod===m&&f.url===u);
 function toggleFav(item){
   if(isFav(item.mod,item.url))favs=favs.filter(f=>!(f.mod===item.mod&&f.url===item.url));else favs.unshift(item);
@@ -1225,7 +1269,7 @@ function render(){({home:rHome,search:rSearch,favs:rFavs,mods:rMods})[tab]()}
 const skeleton=()=>'<div class="grid">'+'<div class="sk"></div>'.repeat(9)+'</div>';
 const tidyTitle=t=>String(t||'').replace(/^thumbnail for\s+/i,'').trim();
 function grid(items){
-  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"><div class="poster"><span class="ph">'+esc((tidyTitle(i.title)[0]||'?').toUpperCase())+'</span><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(tidyTitle(i.title))+'</div>'+(i.note?'<div class="cn">'+esc(i.note)+'</div>':'')+'</button>').join('')+'</div>';
+  return '<div class="grid">'+items.map(i=>'<button class="card" data-m="'+esc(i.mod||cur().id)+'" data-u="'+esc(i.url)+'" data-t="'+esc(i.title)+'" data-c="'+esc(i.cover)+'"'+(i.q?' data-q="'+esc(i.q)+'" data-q2="'+esc(i.q2||'')+'"':'')+'><div class="poster"><span class="ph">'+esc((tidyTitle(i.title)[0]||'?').toUpperCase())+'</span><img loading="lazy" referrerpolicy="no-referrer" src="'+esc(i.cover)+'" alt="" onerror="this.style.visibility=\'hidden\'"></div><div class="ct">'+esc(tidyTitle(i.title))+'</div>'+(i.note?'<div class="cn">'+esc(i.note)+'</div>':'')+'</button>').join('')+'</div>';
 }
 document.addEventListener('error',e=>{
   const im=e.target;if(!im||im.tagName!=='IMG'||im.dataset.fb||!/^https?:/i.test(im.src))return;
@@ -1238,6 +1282,7 @@ document.addEventListener('error',e=>{
 },true);
 $('#main').addEventListener('click',e=>{
   const c=e.target.closest('.card');
+  if(c&&c.dataset.q){openByTitle(c.dataset.m,[c.dataset.q,c.dataset.q2],c.dataset.c);return}
   if(c)openDetail(c.dataset.m,c.dataset.u,{title:c.dataset.t,cover:c.dataset.c});
 });
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)setTab(b.dataset.t)});
@@ -1249,13 +1294,50 @@ const normD=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toL
 let SCHED={day:''};
 function schedActive(F){
   const m=cur();
-  return typeof m.schedule==='function'&&(F.status||[]).some(v=>/emisi/i.test(v))&&Object.keys(F).every(k=>k==='status'||!(F[k]||[]).length);
+  return (F.status||[]).some(v=>/emisi|releasing/i.test(v))&&Object.keys(F).every(k=>k==='status'||!(F[k]||[]).length);
+}
+async function aniWeek(){
+  const d0=new Date();d0.setHours(0,0,0,0);d0.setDate(d0.getDate()-((d0.getDay()+6)%7)); // lunes 00:00 (hora local)
+  const s0=Math.floor(d0.getTime()/1000),e0=s0+7*86400;
+  const q='query($s:Int,$e:Int,$p:Int){Page(page:$p,perPage:50){pageInfo{hasNextPage}airingSchedules(airingAt_greater:$s,airingAt_lesser:$e,sort:TIME){airingAt media{id format countryOfOrigin isAdult title{romaji english}coverImage{large}}}}}';
+  const byDay={},seen=new Set();
+  for(let p=1;p<=6;p++){
+    const r=await fetch('https://graphql.anilist.co',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({query:q,variables:{s:s0-1,e:e0,p}})});
+    if(!r.ok)throw new Error('AniList '+r.status);
+    const j=await r.json(),pg=j&&j.data&&j.data.Page;if(!pg)throw new Error('AniList sin datos');
+    for(const a of pg.airingSchedules){
+      const md=a.media;
+      if(!md||md.isAdult||md.countryOfOrigin!=='JP'||!['TV','TV_SHORT','ONA'].includes(md.format)||seen.has(md.id))continue;
+      seen.add(md.id);
+      const day=new Date(a.airingAt*1000).getDay();
+      (byDay[day]=byDay[day]||[]).push({title:md.title.romaji||md.title.english,q:md.title.romaji||md.title.english,q2:md.title.english||'',cover:(md.coverImage&&md.coverImage.large)||'',url:'',aid:md.id});
+    }
+    if(!pg.pageInfo.hasNextPage)break;
+  }
+  const out=[1,2,3,4,5,6,0].filter(k=>byDay[k]).map(k=>({day:DAY_NAMES[k],items:byDay[k]}));
+  if(out.length<2)throw new Error('AniList sin calendario');
+  return out;
+}
+async function openByTitle(modId,names,cover){
+  const m=modById(modId)||cur(),nz=t=>String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+  toast('Buscando en '+m.name+'…');
+  for(const n of names.filter(Boolean)){
+    try{
+      const r=await m.search(n,1,{});if(!r||!r.length)continue;
+      const k=nz(n),hit=r.find(i=>nz(i.title)===k)||r.find(i=>nz(i.title).includes(k)||k.includes(nz(i.title)))||r[0];
+      if(hit){openDetail(m.id,hit.url,{title:hit.title,cover:hit.cover||cover});return}
+    }catch(e){}
+  }
+  toast('No está disponible en este módulo');
 }
 async function showSchedule(el){
   if(!el)return;const m=cur();
   el.innerHTML='<p class="empty">Cargando horario…</p>';
   let days;
-  try{days=await cached('s|'+m.id,30*60*1000,()=>m.schedule())}
+  try{days=await cached('s|'+m.id,30*60*1000,async()=>{
+    if(typeof m.schedule==='function'){try{const r=await m.schedule();if(Array.isArray(r)&&r.filter(d=>d&&d.items&&d.items.length).length>=2)return r}catch(_){}}
+    return aniWeek();
+  })}
   catch(e){
     el.innerHTML='<p class="empty">No se pudo leer el horario por días ('+esc(e.message)+')</p><button class="btn" id="schRetry">Reintentar</button><h2 class="sec">En emisión</h2><div id="schFb"><p class="empty">Cargando…</p></div>';
     const b=$('#schRetry');if(b)b.onclick=()=>{cached('s|'+m.id,0,()=>0);showSchedule(el)};
@@ -1268,7 +1350,7 @@ async function showSchedule(el){
   if(!days.some(d=>normD(d.day)===SCHED.day))SCHED.day=normD((days.find(d=>normD(d.day)===today)||days[0]).day);
   const draw=()=>{
     const sel=days.find(d=>normD(d.day)===SCHED.day)||days[0];
-    el.innerHTML='<div class="days">'+days.map(d=>'<button type="button" data-d="'+esc(normD(d.day))+'" class="'+(normD(d.day)===SCHED.day?'on':'')+'">'+esc(String(d.day).toUpperCase())+'</button>').join('')+'</div>'+grid(sel.items.map(i=>Object.assign({},i,{mod:m.id})));
+    el.innerHTML='<div class="days">'+days.map(d=>'<button type="button" data-d="'+esc(normD(d.day))+'" class="'+(normD(d.day)===SCHED.day?'on':'')+'">'+esc(String(d.day).toUpperCase())+' <small class="cnt">'+d.items.length+'</small></button>').join('')+'</div>'+grid(sel.items.map(i=>Object.assign({},i,{mod:m.id},m.id==='anilist'&&i.aid?{url:String(i.aid),q:''}:{})));
     const dv=el.querySelector('.days'),on=el.querySelector('.days .on');
     if(dv&&on)dv.scrollLeft=on.offsetLeft-dv.clientWidth/2+on.clientWidth/2;
   };
@@ -1474,7 +1556,7 @@ $('#main').addEventListener('click',async e=>{
   const t=e.target;
   if(t.dataset.act==='fprompt'){copyPrompt(t.dataset.id)}
   else if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();rMods()}
-  else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','animeav1');homeSt={mod:null};loadMods();rMods()}
+  else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','anilist');homeSt={mod:null};loadMods();rMods()}
   else if(t.id==='mInstUrl'){
     const u=$('#mUrl').value.trim();if(!u)return toast('Escribe el enlace');
     try{t.textContent='Descargando…';installCode(await api.text(u));rMods()}catch(err){t.textContent='Instalar desde enlace';toast('Error: '+err.message)}
