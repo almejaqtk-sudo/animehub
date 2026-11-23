@@ -50,6 +50,22 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 .cin{flex:1;min-width:0}.cin b{display:block;font-size:16px}.cin small{display:block;color:var(--mut);font-size:12px;margin-top:2px}
 .dl{flex:none;width:46px;height:46px;border-radius:99px;border:1px solid var(--card2);background:none;color:var(--ac);font-size:20px;display:grid;place-items:center}
 .dl.ok{color:var(--ok)}.dl.up{color:#ffd166}
+.mtitle{font-size:30px;font-weight:800;margin:14px 4px 6px;letter-spacing:-.5px}
+.mtabs{display:flex;border-bottom:1px solid var(--card2);margin:6px 0 14px}
+.mtabs button{flex:1;background:none;border:0;color:var(--tx);font-weight:700;font-size:16px;padding:14px 4px 12px;border-bottom:3px solid transparent}
+.mtabs button.on{color:var(--ac);border-bottom-color:var(--ac)}
+.mtabs .cnt{font-size:11px;background:var(--card2);color:var(--tx);border-radius:99px;padding:2px 7px;margin-left:6px}
+.mc{display:flex;align-items:center;gap:14px;background:var(--card);border-radius:20px;padding:14px;margin-bottom:10px}
+.mc.act{box-shadow:inset 0 0 0 1.5px var(--ok)}
+.mic{flex:none;width:68px;height:68px;border-radius:20px;display:grid;place-items:center;font-weight:800;font-size:20px;color:#fff;overflow:hidden;position:relative}
+.mic img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:8px}
+.mci{flex:1;min-width:0}.mci b{display:block;font-size:18px;line-height:1.2}
+.mci small{display:block;color:var(--tx);opacity:.85;font-size:12.5px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mci small.v{color:var(--mut);opacity:1}
+.mchips{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+.mchip{background:var(--card2);border:0;border-radius:99px;padding:5px 10px;font-size:11px;color:var(--mut)}
+.mbt{flex:none;width:70px;height:52px;border-radius:99px;border:1px solid var(--card2);background:none;color:var(--ac);font-size:21px;display:grid;place-items:center}
+.mbt.up{color:#ffd166}.mbt.ok{color:var(--ok)}
 .mrow small{display:block;color:var(--mut);margin-top:2px;font-size:11px}
 .tag{font-size:11px;color:var(--ok);border:1px solid var(--ok);border-radius:999px;padding:3px 8px}
 .note{color:var(--mut);font-size:12px;line-height:1.5}
@@ -1058,6 +1074,10 @@ return {
   id: 'mi-modulo',            // único, sin espacios
   name: 'Mi módulo',          // nombre visible en la app
   version: 1,
+  category: 'anime',          // opcional: 'anime' | 'hentai' | 'adulto' (en qué pestaña de Módulos aparece)
+  description: 'Servidor de MiWeb.com', // opcional: texto bajo el nombre
+  icon: '',                   // opcional: enlace a la imagen/logo de la web (si no, se usa el icono de la web)
+  site: 'https://miweb.com',  // opcional: dirección de la web
 
   // Pantalla de inicio (page empieza en 1). Opcional.
   async home(page) {
@@ -1177,6 +1197,7 @@ function compile(code){
 }
 let installed=LS.get('mods',[]);
 let mods=[BUILTIN];
+let modTab=LS.get('modTab','anime');
 function loadMods(){
   mods=[BUILTIN];
   installed.forEach(it=>{try{const m=compile(it.code);if(m.id!==BUILTIN.id)mods.push(m)}catch(e){console.error('Módulo '+it.id,e)}});
@@ -1194,7 +1215,9 @@ function installCode(code){
   installed=installed.filter(x=>x.id!==m.id);
   installed.push({id:m.id,code});delete FCACHE[m.id];delete FDONE[m.id];
   LS.set('mods',installed);
-  loadMods();toast('Módulo instalado: '+m.name);
+  loadMods();
+  {const mm=modById(m.id);if(mm){modTab=catOfModule(mm);LS.set('modTab',modTab)}}
+  toast('Módulo instalado: '+m.name);
 }
 
 /* ============ favoritos, recientes, progreso ============ */
@@ -1514,17 +1537,77 @@ async function loadCatalog(force){
   CAT={items:[],base:'',err};return CAT;
 }
 const catColor=id=>{let h=0;for(const c of String(id))h=(h*31+c.charCodeAt(0))%360;return 'hsl('+h+',45%,32%)'};
-function drawCatalog(){
-  const box=$('#catBox');if(!box||!CAT)return;
-  if(CAT.err){box.innerHTML='<p class="note">No se pudo cargar el catálogo ('+esc(CAT.err)+').</p><button class="btn ghost" id="catRetry">Reintentar</button>';return}
-  if(!CAT.items.length){box.innerHTML='<p class="note">El catálogo está vacío.</p>';return}
-  box.innerHTML=CAT.items.map(x=>{
-    const ins=mods.find(m=>m.id===x.id),v=Number(x.version)||0,iv=ins?(Number(ins.version)||0):-1;
-    const btn=!ins?'<button class="dl" data-cat="'+esc(x.id)+'" aria-label="Descargar">⬇</button>'
-      :(v>iv&&!ins.builtin?'<button class="dl up" data-cat="'+esc(x.id)+'" aria-label="Actualizar">⟳</button>':'<span class="dl ok" title="Instalado">✓</span>');
-    return '<div class="crow"><div class="cic" style="background:'+catColor(x.id)+'">'+esc(String(x.name||x.id).slice(0,2))+'</div>'
-      +'<div class="cin"><b>'+esc(x.name||x.id)+'</b><small>'+esc(x.description||'')+'</small><small>'+esc(x.author||'')+' · v'+esc(x.version||1)+'</small></div>'+btn+'</div>';
-  }).join('');
+/* ---- pestañas Anime / Hentai / Adulto ---- */
+const MCATS=[['anime','Anime'],['hentai','Hentai'],['adulto','Adulto']];
+const normCat=c=>{c=String(c||'').toLowerCase();return /hent/.test(c)?'hentai':/adult|xxx|\+?18|porn|jav|r34|rule/.test(c)?'adulto':/anime|donghua|dorama/.test(c)?'anime':''};
+const guessCat=t=>/hentai|henao|hanime|henta/i.test(t)?'hentai':/rule34|r34|jav|porn|xxx|xvideo|nsfw|erotic|adult|sexo/i.test(t)?'adulto':'anime';
+const domainOf=u=>{try{return new URL(u).hostname.replace(/^www\./,'')}catch(e){return ''}};
+function siteOf(m){
+  if(m.site)return String(m.site);
+  const it=installed.find(x=>x.id===m.id);
+  if(it){const a=it.code.match(/BASE_URL\s*=\s*['"`](https?:\/\/[^'"`\s]+)/)||it.code.match(/https?:\/\/[^'"`\s\\)]+/);if(a)return a[1]||a[0]}
+  return m.builtin?'https://anilist.co':'';
+}
+function resolveCat(id,name,site,declared){
+  const ov=LS.get('modcat',{});
+  return ov[id]||normCat(declared)||guessCat(id+' '+name+' '+domainOf(site));
+}
+function catOfModule(m){
+  const cx=CAT&&CAT.items&&CAT.items.find(x=>x.id===m.id);
+  return resolveCat(m.id,m.name,siteOf(m)||(cx&&cx.site)||'',m.category||(cx&&cx.category));
+}
+function modEntries(){
+  const ci=(CAT&&CAT.items)||[],out=[],seen=new Set();
+  const mk=(id,name,ver,desc,author,site,icon,declared,ins,cx)=>{
+    const dom=domainOf(site);
+    return{id,name,version:ver,desc:desc||(dom?'Servidor de '+dom:''),author:author||'',site,icon:icon||'',cat:resolveCat(id,name,site,declared),ins,cx};
+  };
+  mods.forEach(m=>{
+    const cx=ci.find(x=>x.id===m.id);
+    out.push(mk(m.id,m.name,m.version||1,m.description||(cx&&cx.description),m.author||(cx&&cx.author),siteOf(m)||(cx&&cx.site)||'',m.icon||(cx&&cx.icon),m.category||(cx&&cx.category),m,cx));
+    seen.add(m.id);
+  });
+  ci.forEach(x=>{if(seen.has(x.id))return;out.push(mk(x.id,x.name||x.id,x.version||1,x.description,x.author,x.site||'',x.icon,x.category,null,x))});
+  return out;
+}
+function iconHtml(e){
+  let src='';
+  try{src=e.icon?new URL(e.icon,(CAT&&CAT.base)||location.href).href:(domainOf(e.site)?'https://www.google.com/s2/favicons?domain='+encodeURIComponent(domainOf(e.site))+'&sz=128':'')}catch(x){}
+  return '<div class="mic" style="background:'+catColor(e.id)+'"><span>'+esc(String(e.name).slice(0,2))+'</span>'
+    +(src?'<img src="'+esc(src)+'" alt="" loading="lazy" onload="this.parentNode.style.background=\'#2a2640\';this.previousElementSibling.style.display=\'none\'" onerror="this.remove()">':'')+'</div>';
+}
+function drawMods(){
+  const tb=$('#mTabs'),ls=$('#mList');if(!tb||!ls)return;
+  const all=modEntries(),a=cur().id;
+  tb.innerHTML=MCATS.map(([k,l])=>'<button data-mt="'+k+'" class="'+(modTab===k?'on':'')+'">'+l+'<span class="cnt">'+all.filter(e=>e.cat===k).length+'</span></button>').join('');
+  const list=all.filter(e=>e.cat===modTab).sort((x,y)=>(y.ins?1:0)-(x.ins?1:0));
+  ls.innerHTML=list.length?list.map(e=>{
+    const ins=e.ins,id=esc(e.id),iv=ins?(Number(ins.version)||0):-1,cv=e.cx?(Number(e.cx.version)||0):0;
+    const up=!!ins&&!ins.builtin&&cv>iv,isAct=!!ins&&a===e.id;
+    let btn;
+    if(!ins)btn='<button class="mbt" data-cat="'+id+'" aria-label="Instalar">⬇</button>';
+    else if(up)btn='<button class="mbt up" data-cat="'+id+'" aria-label="Actualizar">⟳</button>';
+    else if(ins.builtin)btn='<span class="mbt ok">✓</span>';
+    else btn='<button class="mbt" data-act="del" data-id="'+id+'" aria-label="Quitar">🗑</button>';
+    const chips='<div class="mchips"><button class="mchip" data-act="move" data-id="'+id+'">⇄ Mover</button>'
+      +(ins&&!ins.builtin&&!hasFilters(ins)?'<button class="mchip" data-act="fprompt" data-id="'+id+'">+ Géneros</button>':'')
+      +(up?'<button class="mchip" data-act="del" data-id="'+id+'">Quitar</button>':'')+'</div>';
+    return '<div class="mc'+(isAct?' act':'')+'"'+(ins?' data-act="use" data-id="'+id+'"':'')+'>'+iconHtml(e)
+      +'<div class="mci"><b>'+esc(e.name)+(isAct?' <span class="tag">activo</span>':'')+'</b>'
+      +(e.desc?'<small>'+esc(e.desc)+'</small>':'')+(e.author?'<small>'+esc(e.author)+'</small>':'')
+      +'<small class="v">v'+esc(ins?(ins.version||1):e.version)+(ins&&ins.builtin?' · incluido':'')+(ins&&!hasFilters(ins)?' · sin géneros':'')+(up?' · nueva v'+esc(cv):'')+'</small>'
+      +chips+'</div>'+btn+'</div>';
+  }).join(''):'<p class="note" style="margin:18px 4px">Todavía no hay módulos en esta pestaña. Al instalar uno, aparece en la pestaña que le corresponde.</p>';
+  const cn=$('#catNote');
+  if(cn)cn.innerHTML=!CAT?'<p class="note">Cargando catálogo…</p>':(CAT.err?'<p class="note">No se pudo cargar el catálogo ('+esc(CAT.err)+').</p><button class="btn ghost" id="catRetry">Reintentar</button>':'');
+}
+function moveModule(id){
+  const e=modEntries().find(x=>x.id===id);if(!e)return;
+  openSheet({title:'Mover «'+e.name+'» a…',items:MCATS.map(([k,l])=>({k,label:l,on:k===e.cat})),multi:false,keep:true,onPick:k=>{
+    if(!k)return;
+    const ov=LS.get('modcat',{});ov[id]=k;LS.set('modcat',ov);
+    modTab=k;LS.set('modTab',k);drawMods();toast('Movido a '+MCATS.find(c=>c[0]===k)[1]);
+  }});
 }
 async function installFromCatalog(id,btn){
   const x=CAT&&CAT.items.find(i=>i.id===id);if(!x)return;
@@ -1537,32 +1620,38 @@ async function installFromCatalog(id,btn){
 }
 
 function rMods(){
-  const a=cur().id;
   $('#main').innerHTML=
-   '<h3>Módulos instalados</h3>'+mods.map(m=>'<div class="mrow"><div><b>'+esc(m.name)+'</b><small>'+esc(m.id)+' · v'+esc(m.version||1)+(m.builtin?' · incluido':'')+(hasFilters(m)?'':' · sin géneros')+'</small></div>'
-     +(a===m.id?'<span class="tag">activo</span>':'<button class="sm" data-act="use" data-id="'+esc(m.id)+'">Usar</button>')
-     +(!m.builtin&&!hasFilters(m)?'<button class="sm" data-act="fprompt" data-id="'+esc(m.id)+'">+ Géneros</button>':'')
-     +(m.builtin?'':'<button class="sm del" data-act="del" data-id="'+esc(m.id)+'">Quitar</button>')+'</div>').join('')
-   
-   +'<h3>Catálogo de módulos</h3><div id="catBox"><p class="note">Cargando catálogo…</p></div>'
+   '<h2 class="mtitle">Módulos</h2><div class="mtabs" id="mTabs"></div><div id="mList"></div><div id="catNote"></div>'
    +'<h3>Instalar un módulo</h3>'
    +'<textarea id="mCode" rows="6" placeholder="Pega aquí el código del módulo"></textarea><button class="btn" id="mInstCode">Instalar código pegado</button>'
    +'<button class="btn ghost" id="mInstFile">Instalar desde archivo .js</button><input type="file" id="mFile" accept=".js,.txt,text/javascript,text/plain,application/javascript" hidden>'
    +'<button class="btn ghost" id="mTpl">Copiar plantilla para pedirle módulos a tu IA</button>'
    +'<p class="note">Un módulo es código que corre dentro de la app con acceso a internet. Instala solo módulos que hayas creado tú o de personas en las que confíes.</p>';
-  loadCatalog().then(drawCatalog);
+  drawMods();
+  loadCatalog().then(()=>{if(tab==='mods')drawMods()});
 }
 $('#main').addEventListener('click',async e=>{
   const t=e.target;
   const cb=t.closest&&t.closest('[data-cat]');
   if(cb){installFromCatalog(cb.dataset.cat,cb);return}
-  if(t.id==='catRetry'){CAT=null;const bx=$('#catBox');if(bx)bx.innerHTML='<p class="note">Cargando…</p>';loadCatalog(true).then(drawCatalog);return}
-  if(t.dataset.act==='fprompt'){copyPrompt(t.dataset.id)}
-  else if(t.dataset.act==='use'){LS.set('active',t.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();rMods()}
-  else if(t.dataset.act==='del'){installed=installed.filter(x=>x.id!==t.dataset.id);LS.set('mods',installed);if(LS.get('active')===t.dataset.id)LS.set('active','animeav1');homeSt={mod:null};loadMods();rMods()}
+  const tb=t.closest&&t.closest('[data-mt]');
+  if(tb){modTab=tb.dataset.mt;LS.set('modTab',modTab);drawMods();return}
+  if(t.id==='catRetry'){CAT=null;drawMods();loadCatalog(true).then(()=>{if(tab==='mods')drawMods()});return}
+  const ab=t.closest&&t.closest('[data-act]');
+  const act=ab&&ab.dataset.act,aid=ab&&ab.dataset.id;
+  if(act==='fprompt'){copyPrompt(aid)}
+  else if(act==='move'){moveModule(aid)}
+  else if(act==='use'){
+    LS.set('active',aid);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};rebuildSel();drawMods();
+    const m=modById(aid);if(m)toast('Usando '+m.name);
+  }
+  else if(act==='del'){
+    const m=modById(aid);if(!confirm('¿Quitar '+(m?m.name:aid)+'?'))return;
+    installed=installed.filter(x=>x.id!==aid);LS.set('mods',installed);if(LS.get('active')===aid)LS.set('active','animeav1');homeSt={mod:null};loadMods();drawMods();
+  }
   else if(t.id==='mInstCode'){
     const c=$('#mCode').value.trim();if(!c)return toast('Pega el código primero');
-    try{installCode(c);rMods()}catch(err){toast('Error: '+err.message+(err instanceof SyntaxError?' · se pegaron '+c.length+' caracteres, termina en «'+c.slice(-25).replace(/\s+/g,' ')+'». Si no termina en "};" el texto se cortó: usa "Instalar desde archivo".':''),9000)}
+    try{installCode(c);rMods()}catch(err){toast('Error: '+err.message+(err instanceof SyntaxError?' · se pegaron '+c.length+' caracteres, termina en «'+c.slice(-25).replace(/\s+/g,' ')+'». Si no termina en \"};\" el texto se cortó: usa \"Instalar desde archivo\".':''),9000)}
   }
   else if(t.id==='mInstFile'){$('#mFile').click()}
   else if(t.id==='mTpl'){
