@@ -16,7 +16,24 @@ h1,h3{margin:0}
 #top{display:flex;align-items:center;gap:10px;padding:12px 16px 8px}
 .logo{font-weight:800;font-size:22px;letter-spacing:-.5px}
 .logo span{color:var(--ac)}
-#modSel{margin-left:auto;background:var(--card);border:1px solid #ffffff14;border-radius:999px;padding:8px 12px;font-size:13px;max-width:58%}
+#modSel{margin-left:auto;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid #ffffff14;border-radius:999px;padding:6px 14px 6px 6px;font-size:15px;font-weight:700;max-width:62%;min-width:0}
+#modSel .mic{width:38px;height:38px;border-radius:12px;font-size:13px}
+#modSel .mn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#modSel .chev{color:var(--mut);font-size:12px}
+#mpick{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center}
+.mp-bg{position:absolute;inset:0;background:#000b}
+.mp-box{position:relative;width:min(90vw,420px);max-height:82vh;background:var(--card);border-radius:28px;display:flex;flex-direction:column;padding:22px 8px 12px;box-shadow:0 10px 40px #000a}
+.mp-top{display:grid;place-items:center;color:#b9c6ff}
+#mpL{overflow-y:auto;padding:0 6px;margin-top:4px}
+.mp-g{text-align:center;font-weight:700;font-size:15px;letter-spacing:.6px;text-transform:uppercase;opacity:.85;margin:16px 0 6px}
+.mp-row{display:flex;align-items:center;gap:16px;width:100%;background:none;border:0;padding:8px 12px;text-align:left;border-radius:18px;color:var(--tx)}
+.mp-row.on{background:var(--card2)}
+.mp-row .mic{width:60px;height:60px;border-radius:18px;font-size:18px}
+.mp-t{flex:1;min-width:0}.mp-t b{display:block;font-size:20px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mp-t small{display:block;color:var(--mut);font-size:14px;margin-top:3px}
+.mp-ok{color:var(--ok);font-size:22px;padding-right:6px}
+.mp-foot{display:flex;justify-content:flex-end;padding:10px 18px 4px}
+#mpX{background:none;border:0;color:#b9c6ff;font-weight:700;font-size:18px;padding:10px 14px}
 #main{flex:1;overflow-y:auto;padding:6px 14px 96px}
 #tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:#100e1a;border-top:1px solid #ffffff10;padding-bottom:env(safe-area-inset-bottom);z-index:5}
 #tabs button{flex:1;background:none;border:0;color:var(--mut);padding:10px 0 8px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px}
@@ -172,7 +189,7 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
 </head>
 <body>
 <div id="app">
-  <header id="top"><div class="logo">Anime<span>Hub</span></div><select id="modSel" aria-label="Módulo activo"></select></header>
+  <header id="top"><div class="logo">Anime<span>Hub</span></div><button id="modSel" type="button" aria-label="Elegir módulo"></button></header>
   <main id="main"></main>
   <nav id="tabs">
     <button data-t="home"><i>⌂</i>Inicio</button>
@@ -214,6 +231,15 @@ main h3,#detail h3{font-size:15px;margin:22px 0 10px}
     <div class="sh-h"><b id="shT"></b><button id="shX" aria-label="Cerrar">✕</button></div>
     <div id="shL"></div>
     <div id="shF"><button class="btn ghost" id="shClear">Limpiar</button><button class="btn" id="shApply">Aplicar</button></div>
+  </div>
+</div>
+
+<div id="mpick" hidden>
+  <div class="mp-bg"></div>
+  <div class="mp-box">
+    <div class="mp-top"><svg viewBox="0 0 24 24" width="38" height="38"><path fill="currentColor" d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-2 .9-2 2v3.8h1.5c1.5 0 2.7 1.2 2.7 2.7S5 16.2 3.5 16.2H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.5 1.2-2.7 2.7-2.7s2.7 1.2 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg></div>
+    <div id="mpL"></div>
+    <div class="mp-foot"><button type="button" id="mpX">Cancelar</button></div>
   </div>
 </div>
 
@@ -1207,8 +1233,19 @@ const modById=id=>mods.find(m=>m.id===id);
 if(!LS.get('activeV3')){LS.set('active','animeav1');LS.set('activeV3',1)}
 const cur=()=>modById(LS.get('active','animeav1'))||BUILTIN;
 function rebuildSel(){
-  const a=cur().id;
-  $('#modSel').innerHTML=mods.map(m=>'<option value="'+esc(m.id)+'"'+(m.id===a?' selected':'')+'>'+esc(m.name)+'</option>').join('');
+  const c=cur(),e=modEntries().find(x=>x.id===c.id)||{id:c.id,name:c.name,site:'',icon:''};
+  $('#modSel').innerHTML=iconHtml(e)+'<span class="mn">'+esc(c.name)+'</span><span class="chev">▾</span>';
+}
+function closeModPick(){$('#mpick').hidden=true}
+function openModPick(){
+  const all=modEntries().filter(e=>e.ins),a=cur().id;
+  $('#mpL').innerHTML=MCATS.map(([k,l])=>{
+    const g=all.filter(e=>e.cat===k);if(!g.length)return '';
+    return '<div class="mp-g">'+esc(l)+'</div>'+g.map(e=>'<button type="button" class="mp-row'+(e.id===a?' on':'')+'" data-id="'+esc(e.id)+'">'+iconHtml(e)
+      +'<span class="mp-t"><b>'+esc(e.name)+'</b><small>v'+esc(e.ins.version||1)+(e.ins.builtin?' · incluido':'')+'</small></span>'+(e.id===a?'<span class="mp-ok">✓</span>':'')+'</button>').join('');
+  }).join('')||'<p class="empty">No hay módulos instalados.</p>';
+  $('#mpick').hidden=false;
+  const on=$('#mpL .on');if(on&&on.scrollIntoView)on.scrollIntoView({block:'center'});
 }
 function installCode(code){
   const m=compile(code);
@@ -1271,7 +1308,14 @@ $('#main').addEventListener('click',e=>{
   if(c)openDetail(c.dataset.m,c.dataset.u,{title:c.dataset.t,cover:c.dataset.c});
 });
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)setTab(b.dataset.t)});
-$('#modSel').addEventListener('change',e=>{LS.set('active',e.target.value);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};render()});
+$('#modSel').addEventListener('click',openModPick);
+$('#mpX').onclick=closeModPick;
+$('#mpick .mp-bg').onclick=closeModPick;
+$('#mpL').addEventListener('click',e=>{
+  const b=e.target.closest('.mp-row');if(!b)return;
+  LS.set('active',b.dataset.id);homeSt={mod:null};S={q:'',items:[],page:0,done:false};SF={};HF={};
+  rebuildSel();closeModPick();render();
+});
 
 /* ---- horario semanal (módulos con schedule() y filtro Estado = En emisión) ---- */
 const DAY_NAMES=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -1525,16 +1569,8 @@ function rFavs(){
 const CATALOG_URLS=['https://raw.githubusercontent.com/almejaqtk-sudo/animehub/main/modules/index.json','https://raw.githubusercontent.com/almejaqtk-sudo/animehub/master/modules/index.json'];
 let CAT=null;
 async function loadCatalog(force){
-  if(CAT&&!force&&!CAT.err)return CAT;
-  let err='';
-  for(const u of CATALOG_URLS){
-    try{
-      const j=JSON.parse(await api.text(u+'?t='+Date.now()));
-      const items=(Array.isArray(j)?j:(j.modules||[])).filter(x=>x&&x.id&&x.file);
-      CAT={items,base:u,err:''};return CAT;
-    }catch(e){err=e.message||'sin conexión'}
-  }
-  CAT={items:[],base:'',err};return CAT;
+  /* Catálogo desactivado: los módulos se instalan pegando código o desde un archivo .js */
+  CAT={items:[],base:'',err:''};return CAT;
 }
 const catColor=id=>{let h=0;for(const c of String(id))h=(h*31+c.charCodeAt(0))%360;return 'hsl('+h+',45%,32%)'};
 /* ---- pestañas Anime / Hentai / Adulto ---- */
@@ -1546,7 +1582,7 @@ function siteOf(m){
   if(m.site)return String(m.site);
   const it=installed.find(x=>x.id===m.id);
   if(it){const a=it.code.match(/BASE_URL\s*=\s*['"`](https?:\/\/[^'"`\s]+)/)||it.code.match(/https?:\/\/[^'"`\s\\)]+/);if(a)return a[1]||a[0]}
-  return m.builtin?'https://anilist.co':'';
+  return m.builtin?'https://animeav1.com':'';
 }
 function resolveCat(id,name,site,declared){
   const ov=LS.get('modcat',{});
@@ -1599,7 +1635,7 @@ function drawMods(){
       +chips+'</div>'+btn+'</div>';
   }).join(''):'<p class="note" style="margin:18px 4px">Todavía no hay módulos en esta pestaña. Al instalar uno, aparece en la pestaña que le corresponde.</p>';
   const cn=$('#catNote');
-  if(cn)cn.innerHTML=!CAT?'<p class="note">Cargando catálogo…</p>':(CAT.err?'<p class="note">No se pudo cargar el catálogo ('+esc(CAT.err)+').</p><button class="btn ghost" id="catRetry">Reintentar</button>':'');
+  if(cn)cn.innerHTML='';
 }
 function moveModule(id){
   const e=modEntries().find(x=>x.id===id);if(!e)return;
@@ -2082,7 +2118,8 @@ try{
   const AppP=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.App;
   if(AppP&&AppP.addListener){
     AppP.addListener('backButton',()=>{
-      if(!$('#sheet').hidden)closeSheet();
+      if(!$('#mpick').hidden)closeModPick();
+      else if(!$('#sheet').hidden)closeSheet();
       else if(stack.length)history.back();
       else if(tab!=='home')setTab('home');
       else AppP.exitApp();
